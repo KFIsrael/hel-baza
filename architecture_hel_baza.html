@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HEL Baza — Архитектура системы</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --surface2: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+    --accent: #3b82f6;
+    --accent2: #8b5cf6;
+    --green: #22c55e;
+    --orange: #f59e0b;
+    --red: #ef4444;
+    --cyan: #06b6d4;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; line-height:1.6; }
+
+  .header { background:linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); padding:40px 0; border-bottom:1px solid var(--border); }
+  .header-inner { max-width:1200px; margin:0 auto; padding:0 24px; }
+  .header h1 { font-size:2rem; font-weight:700; margin-bottom:8px; }
+  .header h1 span { color:var(--accent); }
+  .header p { color:var(--text2); font-size:1.1rem; }
+  .badge { display:inline-block; padding:3px 10px; border-radius:12px; font-size:0.75rem; font-weight:600; margin-right:6px; }
+  .badge-blue { background:rgba(59,130,246,0.2); color:#60a5fa; }
+  .badge-green { background:rgba(34,197,94,0.2); color:#4ade80; }
+  .badge-purple { background:rgba(139,92,246,0.2); color:#a78bfa; }
+  .badge-orange { background:rgba(245,158,11,0.2); color:#fbbf24; }
+
+  .container { max-width:1200px; margin:0 auto; padding:32px 24px; }
+
+  .section { margin-bottom:40px; }
+  .section-title { font-size:1.4rem; font-weight:700; margin-bottom:16px; padding-bottom:8px; border-bottom:2px solid var(--accent); display:flex; align-items:center; gap:10px; }
+  .section-title .icon { font-size:1.2rem; }
+
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:16px; }
+  .card h3 { font-size:1.1rem; margin-bottom:10px; color:var(--accent); }
+  .card p { color:var(--text2); font-size:0.9rem; }
+
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+  @media(max-width:768px) { .grid-2,.grid-3 { grid-template-columns:1fr; } }
+
+  .er-container { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; overflow-x:auto; }
+  .er-container .mermaid { display:flex; justify-content:center; }
+
+  table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  th { background:var(--surface2); text-align:left; padding:10px 12px; font-weight:600; }
+  td { padding:8px 12px; border-bottom:1px solid var(--border); }
+  tr:hover td { background:rgba(59,130,246,0.05); }
+  .col-name { color:var(--cyan); font-family:monospace; }
+  .col-type { color:var(--orange); font-family:monospace; font-size:0.8rem; }
+  .col-pk { color:var(--green); font-weight:600; }
+  .col-fk { color:var(--accent2); }
+
+  .flow-step { display:flex; align-items:center; gap:12px; padding:12px 16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:8px; }
+  .flow-num { width:28px; height:28px; border-radius:50%; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.85rem; flex-shrink:0; }
+  .flow-text { font-size:0.9rem; }
+
+  .role-card { padding:16px; border-radius:10px; border-left:4px solid; }
+  .role-admin { border-left-color:var(--red); }
+  .role-manager { border-left-color:var(--orange); }
+  .role-dealer { border-left-color:var(--accent); }
+  .role-client { border-left-color:var(--green); }
+
+  .api-endpoint { font-family:monospace; font-size:0.85rem; padding:4px 8px; background:var(--surface2); border-radius:4px; }
+  .method { font-weight:700; margin-right:6px; }
+  .method-get { color:var(--green); }
+  .method-post { color:var(--accent); }
+  .method-put { color:var(--orange); }
+  .method-delete { color:var(--red); }
+
+  .tabs { display:flex; gap:4px; margin-bottom:16px; border-bottom:1px solid var(--border); }
+  .tab { padding:10px 20px; cursor:pointer; color:var(--text2); border-bottom:2px solid transparent; transition:all 0.2s; }
+  .tab:hover { color:var(--text); }
+  .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .tab-content { display:none; }
+  .tab-content.active { display:block; }
+
+  .toc { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:32px; }
+  .toc h3 { margin-bottom:12px; font-size:1rem; }
+  .toc a { color:var(--accent); text-decoration:none; display:block; padding:4px 0; font-size:0.9rem; }
+  .toc a:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <h1><span>HEL Baza</span> — Архитектура системы v2.0</h1>
+    <p>PIM + Конструктор шлангов + Дилерская сеть + Мультиканальная витрина</p>
+    <div style="margin-top:12px;">
+      <span class="badge badge-blue">React + Tailwind</span>
+      <span class="badge badge-green">Supabase (PostgreSQL)</span>
+      <span class="badge badge-purple">Edge Functions</span>
+      <span class="badge badge-orange">1С + Bitrix24 API</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- TOC -->
+<div class="toc">
+  <h3>Содержание</h3>
+  <a href="#er">1. ER-диаграмма базы данных</a>
+  <a href="#tables">2. Описание таблиц</a>
+  <a href="#roles">3. Роли и права доступа</a>
+  <a href="#constructor">4. Конструктор шланга</a>
+  <a href="#search">5. Поиск (OEM / VIN / аналоги)</a>
+  <a href="#pricing">6. Ценообразование</a>
+  <a href="#api">7. API-эндпоинты</a>
+  <a href="#frontend">8. Компоненты фронтенда</a>
+  <a href="#integrations">9. Интеграции (1С, Bitrix, маркетплейсы)</a>
+  <a href="#security">10. Безопасность и анти-скрейп</a>
+  <a href="#roadmap">11. Дорожная карта</a>
+</div>
+
+<!-- ============= 1. ER DIAGRAM ============= -->
+<div class="section" id="er">
+  <div class="section-title"><span class="icon">📐</span> 1. ER-диаграмма базы данных</div>
+  <div class="er-container">
+    <pre class="mermaid">
+erDiagram
+    %% ===== CORE ENTITIES =====
+
+    schemes {
+        uuid id PK
+        varchar scheme_number UK "Номер схемы ИД (HEL-XXXX)"
+        varchar sku UK "Артикул HEL"
+        text description
+        varchar status "draft|active|archived"
+        boolean is_public "Показывать на витрине"
+        boolean is_verified
+        jsonb metadata
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    scheme_images {
+        uuid id PK
+        uuid scheme_id FK
+        varchar url "Supabase Storage"
+        varchar type "photo|diagram|drawing"
+        boolean is_primary
+        boolean has_watermark
+        int sort_order
+    }
+
+    oem_numbers {
+        uuid id PK
+        varchar oem_number UK "Оригинальный OEM"
+        varchar oem_type "original|analog"
+        uuid manufacturer_id FK
+        varchar status "active|new_oem|deprecated"
+        jsonb raw_data "Доп. данные импорта"
+        timestamp created_at
+    }
+
+    oem_scheme_links {
+        uuid id PK
+        uuid oem_id FK
+        uuid scheme_id FK
+        varchar link_type "primary|cross"
+        timestamp created_at
+    }
+
+    oem_cross_references {
+        uuid id PK
+        uuid source_oem_id FK
+        uuid target_oem_id FK
+        varchar match_type "exact|compatible|similar"
+        float confidence_score
+        boolean is_verified
+        timestamp created_at
+    }
+
+    manufacturers {
+        uuid id PK
+        varchar name UK "ATE, Bosch, Dorman, TRW, Masumo, HEL"
+        varchar code UK
+        boolean is_approved "Только одобренные"
+        boolean is_original "Оригинальный производитель"
+    }
+
+    %% ===== APPLICABILITY =====
+
+    vehicle_brands {
+        uuid id PK
+        varchar name UK "Toyota, BMW, Honda..."
+        varchar type "auto|moto"
+    }
+
+    vehicle_models {
+        uuid id PK
+        uuid brand_id FK
+        varchar name
+        varchar generation
+    }
+
+    vehicle_modifications {
+        uuid id PK
+        uuid model_id FK
+        int year_from
+        int year_to
+        varchar engine
+        varchar body_type
+        jsonb attributes
+    }
+
+    applicability {
+        uuid id PK
+        uuid oem_id FK
+        uuid modification_id FK
+        varchar position "front_left|front_right|rear_left|rear_right|clutch"
+        text notes
+    }
+
+    %% ===== FITTINGS & CONSTRUCTOR =====
+
+    fitting_categories {
+        uuid id PK
+        varchar name "Banjo, Swivel Male, Fixed Male..."
+        varchar code UK
+        text description
+        varchar image_url
+        int sort_order
+    }
+
+    fittings {
+        uuid id PK
+        uuid category_id FK
+        varchar sku UK "Артикул фитинга"
+        varchar name
+        varchar size "M10x1.0, M10x1.25..."
+        varchar thread_type "metric|imperial|bsp|npt"
+        jsonb dimensions
+        varchar image_url
+        boolean is_active
+    }
+
+    fitting_prices {
+        uuid id PK
+        uuid fitting_id FK
+        uuid price_type_id FK
+        decimal price "10.2"
+        varchar currency "GBP|RUB|USD|EUR"
+        timestamp valid_from
+        timestamp valid_to
+    }
+
+    hose_colors {
+        uuid id PK
+        varchar name "Black, Blue, Red, Clear..."
+        varchar hex_code
+        varchar image_url
+        int sort_order
+    }
+
+    hose_lengths {
+        uuid id PK
+        int length_cm
+        decimal price_modifier "Доп. цена за длину"
+    }
+
+    fitting_angles {
+        uuid id PK
+        varchar name "Straight, 20°, 30°, 45°, 60°, 90°"
+        int degrees
+        varchar image_url
+    }
+
+    %% ===== SCHEME COMPOSITION =====
+
+    scheme_fittings {
+        uuid id PK
+        uuid scheme_id FK
+        uuid fitting_id FK
+        varchar position "left|right"
+        uuid angle_id FK
+        int quantity
+    }
+
+    scheme_components {
+        uuid id PK
+        uuid scheme_id FK
+        varchar component_type "hose|support|heatshrink|accessory"
+        uuid color_id FK
+        int length_cm
+        jsonb properties
+    }
+
+    %% ===== PRICING =====
+
+    price_types {
+        uuid id PK
+        varchar name UK "retail|wholesale|dealer|marketplace_ozon|marketplace_wb"
+        varchar display_name
+        decimal coefficient "Множитель от базовой"
+        boolean is_active
+    }
+
+    scheme_prices {
+        uuid id PK
+        uuid scheme_id FK
+        uuid price_type_id FK
+        decimal calculated_price
+        decimal manual_override
+        varchar currency
+        timestamp calculated_at
+    }
+
+    %% ===== USERS & AUTH =====
+
+    profiles {
+        uuid id PK "= auth.users.id"
+        varchar role "admin|manager|dealer|client"
+        varchar company_name
+        varchar phone
+        varchar inn
+        decimal balance "Баланс дилера"
+        jsonb settings
+        timestamp created_at
+    }
+
+    %% ===== DEALER SYSTEM =====
+
+    balance_transactions {
+        uuid id PK
+        uuid profile_id FK
+        decimal amount
+        varchar type "topup|query_charge|refund"
+        decimal balance_after
+        text description
+        timestamp created_at
+    }
+
+    %% ===== SEARCH & LOGGING =====
+
+    search_logs {
+        uuid id PK
+        uuid user_id FK "nullable"
+        varchar query_type "oem|vin|brand_model|analog"
+        varchar query_text
+        int results_count
+        decimal charge_amount "Списано с баланса"
+        varchar ip_address
+        varchar user_agent
+        timestamp created_at
+    }
+
+    %% ===== ORDERS =====
+
+    orders {
+        uuid id PK
+        uuid profile_id FK
+        uuid scheme_id FK
+        varchar status "draft|pending|sent_to_1c|confirmed|shipped|completed"
+        decimal total_price
+        varchar currency
+        jsonb configuration "Конфигурация конструктора"
+        varchar external_order_id "ID в 1С"
+        timestamp created_at
+    }
+
+    order_items {
+        uuid id PK
+        uuid order_id FK
+        uuid fitting_id FK
+        int quantity
+        decimal unit_price
+        decimal total_price
+    }
+
+    %% ===== EXPORT CHANNELS =====
+
+    export_channels {
+        uuid id PK
+        varchar name "ozon|wildberries|emex|zzap|site|crm"
+        varchar display_name
+        jsonb field_mapping "Маппинг полей"
+        uuid price_type_id FK
+        boolean is_active
+    }
+
+    export_templates {
+        uuid id PK
+        uuid channel_id FK
+        varchar name
+        jsonb columns "Набор полей для выгрузки"
+        jsonb filters
+    }
+
+    %% ===== RELATIONSHIPS =====
+
+    schemes ||--o{ scheme_images : "has"
+    schemes ||--o{ oem_scheme_links : "linked_to"
+    schemes ||--o{ scheme_fittings : "composed_of"
+    schemes ||--o{ scheme_components : "has"
+    schemes ||--o{ scheme_prices : "priced_as"
+    schemes ||--o{ orders : "ordered_as"
+
+    oem_numbers ||--o{ oem_scheme_links : "linked_to"
+    oem_numbers ||--o{ applicability : "applies_to"
+    oem_numbers }o--|| manufacturers : "made_by"
+    oem_numbers ||--o{ oem_cross_references : "source"
+    oem_numbers ||--o{ oem_cross_references : "target"
+
+    vehicle_brands ||--o{ vehicle_models : "has"
+    vehicle_models ||--o{ vehicle_modifications : "has"
+    vehicle_modifications ||--o{ applicability : "used_in"
+
+    fitting_categories ||--o{ fittings : "contains"
+    fittings ||--o{ fitting_prices : "priced"
+    fittings ||--o{ scheme_fittings : "used_in"
+    fittings ||--o{ order_items : "ordered"
+
+    fitting_angles ||--o{ scheme_fittings : "angled"
+    hose_colors ||--o{ scheme_components : "colored"
+
+    price_types ||--o{ fitting_prices : "type"
+    price_types ||--o{ scheme_prices : "type"
+    price_types ||--o{ export_channels : "uses"
+
+    profiles ||--o{ balance_transactions : "has"
+    profiles ||--o{ search_logs : "searched"
+    profiles ||--o{ orders : "placed"
+
+    orders ||--o{ order_items : "contains"
+    export_channels ||--o{ export_templates : "has"
+    </pre>
+  </div>
+</div>
+
+<!-- ============= 2. TABLES ============= -->
+<div class="section" id="tables">
+  <div class="section-title"><span class="icon">🗄️</span> 2. Описание таблиц (ключевые)</div>
+
+  <div class="tabs" id="tableTabs">
+    <div class="tab active" onclick="switchTab(event,'tab-core')">Ядро (OEM+Схемы)</div>
+    <div class="tab" onclick="switchTab(event,'tab-fittings')">Фитинги</div>
+    <div class="tab" onclick="switchTab(event,'tab-vehicles')">Применимость</div>
+    <div class="tab" onclick="switchTab(event,'tab-users')">Пользователи</div>
+    <div class="tab" onclick="switchTab(event,'tab-export')">Экспорт</div>
+  </div>
+
+  <div class="tab-content active" id="tab-core">
+    <div class="card">
+      <h3>schemes — Схемы (ИД)</h3>
+      <p>Центральная сущность. Одна схема = инструкция по сборке шланга. Может соответствовать нескольким OEM.</p>
+      <table>
+        <tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+        <tr><td class="col-name col-pk">id</td><td class="col-type">uuid PK</td><td>Первичный ключ</td></tr>
+        <tr><td class="col-name">scheme_number</td><td class="col-type">varchar UNIQUE</td><td>Номер схемы ИД (HEL-0001), генерируется автоматически</td></tr>
+        <tr><td class="col-name">sku</td><td class="col-type">varchar UNIQUE</td><td>Артикул HEL для продажи</td></tr>
+        <tr><td class="col-name">description</td><td class="col-type">text</td><td>Описание шланга</td></tr>
+        <tr><td class="col-name">status</td><td class="col-type">enum</td><td>draft → active → archived</td></tr>
+        <tr><td class="col-name">is_public</td><td class="col-type">boolean</td><td>Показывать на публичной витрине</td></tr>
+        <tr><td class="col-name">is_verified</td><td class="col-type">boolean</td><td>Проверена менеджером</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>oem_numbers — OEM номера</h3>
+      <p>Все OEM номера: оригинальные и аналоги. Связь аналогов через oem_cross_references.</p>
+      <table>
+        <tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+        <tr><td class="col-name col-pk">id</td><td class="col-type">uuid PK</td><td>Первичный ключ</td></tr>
+        <tr><td class="col-name">oem_number</td><td class="col-type">varchar UNIQUE</td><td>Номер OEM (нормализованный)</td></tr>
+        <tr><td class="col-name">oem_type</td><td class="col-type">enum</td><td>original | analog</td></tr>
+        <tr><td class="col-name col-fk">manufacturer_id</td><td class="col-type">uuid FK</td><td>→ manufacturers. Производитель</td></tr>
+        <tr><td class="col-name">status</td><td class="col-type">enum</td><td>active | new_oem | deprecated</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>oem_cross_references — Кроссы аналогов</h3>
+      <p>Связь OEM между собой. Ключевая таблица для поиска аналогов. source_oem → target_oem.</p>
+      <table>
+        <tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+        <tr><td class="col-name col-fk">source_oem_id</td><td class="col-type">uuid FK</td><td>Исходный OEM</td></tr>
+        <tr><td class="col-name col-fk">target_oem_id</td><td class="col-type">uuid FK</td><td>Аналог OEM</td></tr>
+        <tr><td class="col-name">match_type</td><td class="col-type">enum</td><td>exact | compatible | similar</td></tr>
+        <tr><td class="col-name">confidence_score</td><td class="col-type">float</td><td>0.0–1.0, уверенность совпадения</td></tr>
+        <tr><td class="col-name">is_verified</td><td class="col-type">boolean</td><td>Проверено вручную</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-fittings">
+    <div class="card">
+      <h3>fitting_categories — Типы фитингов</h3>
+      <p>Banjo, Swivel Male, Fixed Male, Fixed Extended Male, Fixed Bulkhead Male, Fixed NPT Male, Swivel Female, Swivel Circlip Female и т.д.</p>
+    </div>
+    <div class="card">
+      <h3>fittings — Каталог фитингов</h3>
+      <p>Конкретные фитинги с размерами и артикулами. Цены загружаются из 1С через fitting_prices.</p>
+      <table>
+        <tr><th>Поле</th><th>Тип</th><th>Описание</th></tr>
+        <tr><td class="col-name">sku</td><td class="col-type">varchar UNIQUE</td><td>Артикул фитинга из 1С</td></tr>
+        <tr><td class="col-name">name</td><td class="col-type">varchar</td><td>Название</td></tr>
+        <tr><td class="col-name">size</td><td class="col-type">varchar</td><td>M10x1.0, M10x1.25, 3/8-24...</td></tr>
+        <tr><td class="col-name">thread_type</td><td class="col-type">enum</td><td>metric | imperial | bsp | npt</td></tr>
+        <tr><td class="col-name">dimensions</td><td class="col-type">jsonb</td><td>Габариты, чертёж</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>fitting_prices — Цены фитингов</h3>
+      <p>Мультивалютные цены с типами (опт/розница/маркетплейсы). Автозагрузка из 1С.</p>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-vehicles">
+    <div class="card">
+      <h3>Иерархия: vehicle_brands → vehicle_models → vehicle_modifications</h3>
+      <p>Трёхуровневая структура: Бренд (Toyota) → Модель (Camry XV70) → Модификация (2018–2024, 2.5L, Sedan). Модификация привязывается к OEM через таблицу applicability.</p>
+      <p style="margin-top:8px;color:var(--orange);">⚠️ Марка/модель/год — информационные поля, НЕ связующие. Связь аналогов идёт через OEM кроссы.</p>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-users">
+    <div class="card">
+      <h3>profiles — Профили пользователей</h3>
+      <p>Расширение auth.users Supabase. Роль определяет доступ: admin, manager, dealer, client.</p>
+    </div>
+    <div class="card">
+      <h3>balance_transactions — Баланс дилера</h3>
+      <p>Пополнение и списания. Каждый поисковый запрос дилера списывает фиксированную сумму.</p>
+    </div>
+    <div class="card">
+      <h3>search_logs — Лог запросов</h3>
+      <p>Все поисковые запросы с аналитикой: тип, текст, кол-во результатов, IP, user-agent. Для статистики «что ищут».</p>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-export">
+    <div class="card">
+      <h3>export_channels — Каналы продаж</h3>
+      <p>Минимум 6 каналов: сайт, Ozon, Wildberries, Emex, ZZAP, CRM. Каждый канал имеет свой маппинг полей и тип цен.</p>
+    </div>
+    <div class="card">
+      <h3>export_templates — Шаблоны выгрузки</h3>
+      <p>Настраиваемые шаблоны Excel: какие поля выгружать, какие фильтры применять. Менеджеры могут создавать свои шаблоны.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============= 3. ROLES ============= -->
+<div class="section" id="roles">
+  <div class="section-title"><span class="icon">👥</span> 3. Роли и права доступа</div>
+  <div class="grid-2">
+    <div class="card role-card role-admin">
+      <h3 style="color:var(--red);">🔴 Админ</h3>
+      <p>Полный доступ ко всему: управление базой, роли, пользователи, аналоги, схемы, OEM, каналы экспорта, настройки цен, логи. Row Level Security (RLS) — без ограничений.</p>
+    </div>
+    <div class="card role-card role-manager">
+      <h3 style="color:var(--orange);">🟠 Менеджер</h3>
+      <p>PIM: создание/редактирование OEM, схем, фитингов, загрузка изображений, связывание аналогов, конструктор шланга с сохранением в базу, Excel импорт/экспорт.</p>
+    </div>
+    <div class="card role-card role-dealer">
+      <h3 style="color:var(--accent);">🔵 Дилер</h3>
+      <p>Поиск (OEM, VIN, марка/модель). Баланс с пополнением, списание за каждый запрос. Просмотр карточек, цены дилерские. История запросов, статистика.</p>
+    </div>
+    <div class="card role-card role-client">
+      <h3 style="color:var(--green);">🟢 Клиент</h3>
+      <p>Поиск (бесплатно или с ограничением). Конструктор кастомного шланга. Просмотр карточек, розничные цены. Заказ фитингов → 1С. Личный кабинет, история.</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3>Supabase RLS — Политики безопасности</h3>
+    <table>
+      <tr><th>Таблица</th><th>admin</th><th>manager</th><th>dealer</th><th>client</th></tr>
+      <tr><td>schemes</td><td>CRUD</td><td>CRUD</td><td>R (is_public)</td><td>R (is_public)</td></tr>
+      <tr><td>oem_numbers</td><td>CRUD</td><td>CRUD</td><td>R</td><td>R</td></tr>
+      <tr><td>fittings / prices</td><td>CRUD</td><td>R</td><td>R (по price_type)</td><td>R (retail)</td></tr>
+      <tr><td>profiles</td><td>CRUD all</td><td>R own</td><td>RU own</td><td>RU own</td></tr>
+      <tr><td>search_logs</td><td>R all</td><td>R all</td><td>R own</td><td>R own</td></tr>
+      <tr><td>orders</td><td>CRUD all</td><td>RU all</td><td>CR own</td><td>CR own</td></tr>
+      <tr><td>balance_transactions</td><td>CRUD</td><td>R</td><td>R own</td><td>—</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ============= 4. CONSTRUCTOR ============= -->
+<div class="section" id="constructor">
+  <div class="section-title"><span class="icon">🔧</span> 4. Конструктор шланга</div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>Режим «Клиент» — Кастомный шланг</h3>
+      <div class="flow-step"><div class="flow-num">1</div><div class="flow-text">Выбор <strong>левого фитинга</strong>: тип → размер → угол</div></div>
+      <div class="flow-step"><div class="flow-num">2</div><div class="flow-text">Выбор <strong>правого фитинга</strong>: тип → размер → угол</div></div>
+      <div class="flow-step"><div class="flow-num">3</div><div class="flow-text">Выбор <strong>цвета шланга</strong> (визуальные свотчи)</div></div>
+      <div class="flow-step"><div class="flow-num">4</div><div class="flow-text"><strong>Длина</strong> шланга (15–200+ см, шаг 1 см)</div></div>
+      <div class="flow-step"><div class="flow-num">5</div><div class="flow-text">Опции: Stealth Heatshrink, Support (1-3), назначение (Brake/Clutch)</div></div>
+      <div class="flow-step"><div class="flow-num">6</div><div class="flow-text"><strong>Превью</strong>: изображение собранного шланга + расчёт цены</div></div>
+      <div class="flow-step"><div class="flow-num">7</div><div class="flow-text">Аксессуары (банджо болты и т.п.)</div></div>
+      <div class="flow-step"><div class="flow-num">8</div><div class="flow-text"><strong>Заказ</strong> → оплата → отправка в 1С/Bitrix</div></div>
+    </div>
+
+    <div class="card">
+      <h3>Режим «Менеджер» — Добавление в базу</h3>
+      <div class="flow-step"><div class="flow-num">1</div><div class="flow-text">Всё то же + ввод <strong>OEM номера</strong></div></div>
+      <div class="flow-step"><div class="flow-num">2</div><div class="flow-text">Система проверяет: <strong>есть ли такой OEM</strong> в базе?</div></div>
+      <div class="flow-step"><div class="flow-num">3</div><div class="flow-text">Если есть → показать карточку, предложить обновить</div></div>
+      <div class="flow-step"><div class="flow-num">4</div><div class="flow-text">Если нет → «Подгрузить кроссы»: поиск аналогов в базе кроссировок</div></div>
+      <div class="flow-step"><div class="flow-num">5</div><div class="flow-text">Если кроссов нет → «Заполнить вручную» + статус <strong>«new_oem»</strong></div></div>
+      <div class="flow-step"><div class="flow-num">6</div><div class="flow-text">Добавить <strong>применимость</strong> (марка/модель/год)</div></div>
+      <div class="flow-step"><div class="flow-num">7</div><div class="flow-text">Загрузить <strong>изображение/схему</strong></div></div>
+      <div class="flow-step"><div class="flow-num">8</div><div class="flow-text"><strong>Генерация SKU</strong> → сохранение схемы как ИД в базу</div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3>Формула расчёта цены</h3>
+    <p style="font-family:monospace; font-size:0.95rem; color:var(--cyan); background:var(--surface2); padding:12px; border-radius:8px; margin-top:8px;">
+      price = (fitting_left.price + fitting_right.price) + (hose_length_cm × price_per_cm) + heatshrink_price + Σ(supports.price) + Σ(accessories.price)
+    </p>
+    <p style="margin-top:8px;color:var(--text2);">Итоговая цена умножается на коэффициент price_type (retail ×1.0, wholesale ×0.7, ozon ×1.15 и т.д.)</p>
+  </div>
+</div>
+
+<!-- ============= 5. SEARCH ============= -->
+<div class="section" id="search">
+  <div class="section-title"><span class="icon">🔍</span> 5. Поиск</div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>Типы поиска</h3>
+      <table>
+        <tr><th>Тип</th><th>Описание</th><th>Таблицы</th></tr>
+        <tr><td><strong>OEM</strong></td><td>Прямой поиск по номеру OEM</td><td>oem_numbers → oem_scheme_links → schemes</td></tr>
+        <tr><td><strong>Аналог</strong></td><td>Поиск через кроссы</td><td>oem_cross_references → oem_numbers → schemes</td></tr>
+        <tr><td><strong>Марка/Модель/Год</strong></td><td>Фильтр по применимости</td><td>vehicle_* → applicability → oem_numbers → schemes</td></tr>
+        <tr><td><strong>VIN</strong></td><td>Расшифровка VIN → марка/модель/год → поиск</td><td>VIN decode API → applicability chain</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Оптимизация поиска</h3>
+      <p>• <strong>GIN индексы</strong> на oem_number (pg_trgm) для нечёткого поиска</p>
+      <p>• <strong>Full-text search</strong> по описаниям (tsvector)</p>
+      <p>• <strong>Materialized view</strong> для «плоской» карточки (денормализация для скорости)</p>
+      <p>• <strong>Нормализация OEM</strong>: удаление пробелов, дефисов, приведение к верхнему регистру перед поиском</p>
+      <p style="margin-top:12px;color:var(--orange);">Для дилеров: каждый поисковый запрос → списание с баланса + запись в search_logs</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============= 6. PRICING ============= -->
+<div class="section" id="pricing">
+  <div class="section-title"><span class="icon">💰</span> 6. Ценообразование</div>
+  <div class="card">
+    <h3>Мультиканальные цены</h3>
+    <table>
+      <tr><th>Тип цены</th><th>Коэффициент</th><th>Валюта</th><th>Каналы</th></tr>
+      <tr><td>retail (розница)</td><td>×1.0</td><td>RUB</td><td>Сайт-витрина, клиенты</td></tr>
+      <tr><td>wholesale (опт)</td><td>×0.7</td><td>RUB</td><td>Дилеры, оптовики</td></tr>
+      <tr><td>dealer</td><td>×0.8</td><td>RUB</td><td>Дилерский кабинет</td></tr>
+      <tr><td>marketplace_ozon</td><td>×1.15</td><td>RUB</td><td>Ozon</td></tr>
+      <tr><td>marketplace_wb</td><td>×1.12</td><td>RUB</td><td>Wildberries</td></tr>
+      <tr><td>export_gbp</td><td>custom</td><td>GBP</td><td>1С, HEL UK</td></tr>
+      <tr><td>crm</td><td>×1.0</td><td>RUB</td><td>Bitrix24</td></tr>
+    </table>
+    <p style="margin-top:12px;color:var(--text2);">Админ может добавлять новые типы цен. Коэффициенты и валюты настраиваемые.</p>
+  </div>
+</div>
+
+<!-- ============= 7. API ============= -->
+<div class="section" id="api">
+  <div class="section-title"><span class="icon">⚡</span> 7. API-эндпоинты (Supabase Edge Functions + PostgREST)</div>
+
+  <div class="card">
+    <h3>Поиск</h3>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/search?type=oem&q=43095-S04-A01</span> — Поиск по OEM</p>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/search?type=vin&q=JH4KA7650NC000123</span> — Поиск по VIN</p>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/search?type=vehicle&brand=Toyota&model=Camry&year=2020</span> — По авто</p>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/search/suggestions?q=4309</span> — Автокомплит</p>
+  </div>
+
+  <div class="card">
+    <h3>Каталог</h3>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/schemes/:id</span> — Карточка схемы (ИД)</p>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/schemes/:id/analogs</span> — Аналоги схемы</p>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/schemes/:id/price?type=retail</span> — Цена по типу</p>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/fittings?category=banjo&size=M10</span> — Каталог фитингов</p>
+  </div>
+
+  <div class="card">
+    <h3>Конструктор</h3>
+    <p><span class="method method-post">POST</span> <span class="api-endpoint">/api/constructor/calculate</span> — Расчёт цены конфигурации</p>
+    <p><span class="method method-post">POST</span> <span class="api-endpoint">/api/constructor/save</span> — Сохранить как ИД (менеджер)</p>
+    <p><span class="method method-post">POST</span> <span class="api-endpoint">/api/constructor/order</span> — Создать заказ</p>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/constructor/options</span> — Все опции конструктора</p>
+  </div>
+
+  <div class="card">
+    <h3>PIM (менеджер/админ)</h3>
+    <p><span class="method method-post">POST</span> <span class="api-endpoint">/api/pim/oem</span> — Создать OEM</p>
+    <p><span class="method method-post">POST</span> <span class="api-endpoint">/api/pim/oem/:id/cross-check</span> — Подгрузить кроссы</p>
+    <p><span class="method method-post">POST</span> <span class="api-endpoint">/api/pim/scheme</span> — Создать схему</p>
+    <p><span class="method method-post">POST</span> <span class="api-endpoint">/api/pim/import/xlsx</span> — Импорт Excel</p>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/pim/export/xlsx?template=:id</span> — Экспорт Excel</p>
+  </div>
+
+  <div class="card">
+    <h3>Дилерская система</h3>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/dealer/balance</span> — Текущий баланс</p>
+    <p><span class="method method-post">POST</span> <span class="api-endpoint">/api/dealer/topup</span> — Пополнить баланс</p>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/dealer/history</span> — История транзакций</p>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/analytics/search-stats</span> — Статистика запросов (админ)</p>
+  </div>
+
+  <div class="card">
+    <h3>Интеграция 1С</h3>
+    <p><span class="method method-post">POST</span> <span class="api-endpoint">/api/integration/1c/prices</span> — Загрузка цен фитингов</p>
+    <p><span class="method method-post">POST</span> <span class="api-endpoint">/api/integration/1c/order</span> — Отправка заказа в 1С</p>
+    <p><span class="method method-get">GET</span> <span class="api-endpoint">/api/integration/1c/stock</span> — Наличие на складе</p>
+  </div>
+</div>
+
+<!-- ============= 8. FRONTEND ============= -->
+<div class="section" id="frontend">
+  <div class="section-title"><span class="icon">🖥️</span> 8. Компоненты фронтенда (React + Tailwind + shadcn/ui)</div>
+
+  <div class="grid-3">
+    <div class="card">
+      <h3>🏪 Витрина (public)</h3>
+      <p>• SearchBar — универсальный поиск</p>
+      <p>• SchemeCard — карточка шланга</p>
+      <p>• SchemeDetail — полная карточка</p>
+      <p>• AnalogsList — список аналогов</p>
+      <p>• ApplicabilityTable — применимость</p>
+      <p>• PriceDisplay — цена с калькуляцией</p>
+      <p>• OrderButton — «Купить фитинги»</p>
+      <p>• HoseConstructor — конструктор</p>
+    </div>
+    <div class="card">
+      <h3>👤 Кабинеты</h3>
+      <p><strong>Клиент:</strong></p>
+      <p>• Dashboard — обзор</p>
+      <p>• OrderHistory — история заказов</p>
+      <p>• SearchHistory — история поиска</p>
+      <p style="margin-top:8px;"><strong>Дилер (+ к клиенту):</strong></p>
+      <p>• BalanceWidget — баланс</p>
+      <p>• TopUpForm — пополнение</p>
+      <p>• TransactionLog — транзакции</p>
+      <p>• UsageStats — статистика</p>
+    </div>
+    <div class="card">
+      <h3>⚙️ Админ / PIM</h3>
+      <p>• OemManager — CRUD OEM</p>
+      <p>• SchemeEditor — редактор схем</p>
+      <p>• CrossReferenceManager — кроссы</p>
+      <p>• FittingCatalog — каталог фитингов</p>
+      <p>• ImageUploader — загрузка фото</p>
+      <p>• ExcelImportExport — Excel</p>
+      <p>• PriceManager — цены</p>
+      <p>• UserManager — пользователи</p>
+      <p>• AnalyticsDashboard — аналитика</p>
+      <p>• ExportChannelConfig — каналы</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3>Структура маршрутов</h3>
+    <table>
+      <tr><th>Маршрут</th><th>Компонент</th><th>Роль</th></tr>
+      <tr><td class="col-name">/</td><td>Главная + поиск</td><td>all</td></tr>
+      <tr><td class="col-name">/search</td><td>Результаты поиска</td><td>all</td></tr>
+      <tr><td class="col-name">/scheme/:id</td><td>Карточка шланга</td><td>all (с ограничениями)</td></tr>
+      <tr><td class="col-name">/constructor</td><td>Конструктор шланга</td><td>all</td></tr>
+      <tr><td class="col-name">/login, /register</td><td>Авторизация</td><td>all</td></tr>
+      <tr><td class="col-name">/dashboard</td><td>Личный кабинет</td><td>client+</td></tr>
+      <tr><td class="col-name">/dealer</td><td>Дилерский кабинет</td><td>dealer</td></tr>
+      <tr><td class="col-name">/admin</td><td>Админка</td><td>admin, manager</td></tr>
+      <tr><td class="col-name">/admin/pim</td><td>PIM — OEM, схемы</td><td>admin, manager</td></tr>
+      <tr><td class="col-name">/admin/fittings</td><td>Каталог фитингов</td><td>admin, manager</td></tr>
+      <tr><td class="col-name">/admin/prices</td><td>Управление ценами</td><td>admin</td></tr>
+      <tr><td class="col-name">/admin/users</td><td>Управление пользователями</td><td>admin</td></tr>
+      <tr><td class="col-name">/admin/analytics</td><td>Аналитика и логи</td><td>admin</td></tr>
+      <tr><td class="col-name">/admin/export</td><td>Каналы выгрузки</td><td>admin, manager</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ============= 9. INTEGRATIONS ============= -->
+<div class="section" id="integrations">
+  <div class="section-title"><span class="icon">🔗</span> 9. Интеграции</div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>1С → Supabase</h3>
+      <p><strong>Входящие:</strong> Цены фитингов, наличие, спецификации</p>
+      <p><strong>Исходящие:</strong> Заказы на фитинги, новые схемы</p>
+      <p style="margin-top:8px;"><strong>Механизм:</strong> REST API (Edge Function) с API-ключом. 1С отправляет JSON с ценами → Edge Function валидирует и обновляет fitting_prices. Поддержка ручного и автоматического режима (по расписанию).</p>
+    </div>
+    <div class="card">
+      <h3>Bitrix24 CRM</h3>
+      <p><strong>Исходящие:</strong> Заказы, заявки с лендинга</p>
+      <p><strong>Входящие:</strong> Статусы заказов</p>
+      <p style="margin-top:8px;"><strong>Механизм:</strong> Bitrix24 REST API. При создании заказа → webhook отправляет данные в CRM как сделку.</p>
+    </div>
+    <div class="card">
+      <h3>Маркетплейсы (Drive, Emex, ZZAP)</h3>
+      <p><strong>Исходящие:</strong> Каталог товаров по шаблону</p>
+      <p style="margin-top:8px;"><strong>Механизм:</strong> Генерация Excel/CSV по шаблону export_template. Ручная выгрузка (v1), API-push (v2).</p>
+    </div>
+    <div class="card">
+      <h3>VIN Decode</h3>
+      <p><strong>Входящие:</strong> Расшифровка VIN → марка/модель/год</p>
+      <p style="margin-top:8px;"><strong>Механизм:</strong> Внешний API (NHTSA бесплатный или коммерческий). Edge Function как прокси с кэшированием результатов.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============= 10. SECURITY ============= -->
+<div class="section" id="security">
+  <div class="section-title"><span class="icon">🛡️</span> 10. Безопасность и анти-скрейп</div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>Анти-парсинг</h3>
+      <p>• <strong>Rate limiting</strong> — лимит запросов по IP + по user (настраиваемый)</p>
+      <p>• <strong>API токены</strong> — все запросы через авторизацию (JWT Supabase)</p>
+      <p>• <strong>Watermark на схемы</strong> — наложение при отдаче изображений (Edge Function + Sharp)</p>
+      <p>• <strong>SSR</strong> — Server-side rendering, данные не в открытом JSON</p>
+      <p>• <strong>Honeypot поля</strong> — ловушки для ботов</p>
+      <p>• <strong>CAPTCHA</strong> — при превышении лимита запросов</p>
+    </div>
+    <div class="card">
+      <h3>Защита данных</h3>
+      <p>• <strong>RLS</strong> (Row Level Security) — на каждой таблице</p>
+      <p>• <strong>Supabase Auth</strong> — JWT, email/password, magic link</p>
+      <p>• <strong>Роли в БД</strong> — через profiles.role + RLS policies</p>
+      <p>• <strong>Аудит-лог</strong> — все действия с критичными данными</p>
+      <p>• <strong>Бэкап</strong> — автоматический через Supabase</p>
+      <p>• <strong>CORS</strong> — только разрешённые домены</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============= 11. ROADMAP ============= -->
+<div class="section" id="roadmap">
+  <div class="section-title"><span class="icon">🗺️</span> 11. Дорожная карта</div>
+
+  <div class="card" style="border-left:4px solid var(--green);">
+    <h3>Этап 1 — Фундамент (2-3 недели)</h3>
+    <p>✅ Создание Supabase проекта + схема БД (миграции)</p>
+    <p>✅ RLS политики + авторизация (admin, manager, dealer, client)</p>
+    <p>✅ Базовый CRUD: OEM, схемы, фитинги, производители</p>
+    <p>✅ Каталог фитингов с ценами</p>
+    <p>✅ Справочники: vehicle_brands, models, modifications</p>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--accent);">
+    <h3>Этап 2 — PIM + Конструктор (3-4 недели)</h3>
+    <p>🔧 PIM-интерфейс: создание OEM, схем, связывание аналогов</p>
+    <p>🔧 Конструктор шланга (клиентский + менеджерский режимы)</p>
+    <p>🔧 Калькулятор цен</p>
+    <p>🔧 Загрузка изображений (Supabase Storage)</p>
+    <p>🔧 Excel импорт/экспорт с валидацией</p>
+    <p>🔧 Генерация SKU</p>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--accent2);">
+    <h3>Этап 3 — Поиск + Витрина (2-3 недели)</h3>
+    <p>🔍 Полнотекстовый поиск (OEM, аналоги, марка/модель)</p>
+    <p>🔍 VIN-decode (интеграция API)</p>
+    <p>🔍 Публичная витрина с карточками</p>
+    <p>🔍 Клиентский ЛК</p>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--orange);">
+    <h3>Этап 4 — Дилерка + Монетизация (2 недели)</h3>
+    <p>💳 Дилерский кабинет с балансом</p>
+    <p>💳 Списание за запросы</p>
+    <p>💳 Аналитика и статистика запросов</p>
+    <p>💳 Система заказов → 1С</p>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--red);">
+    <h3>Этап 5 — Интеграции + Каналы (2-3 недели)</h3>
+    <p>🔗 Интеграция с 1С (автозагрузка цен)</p>
+    <p>🔗 Bitrix24 CRM</p>
+    <p>🔗 Каналы выгрузки (маркетплейсы)</p>
+    <p>🔗 Анти-скрейп защита</p>
+    <p>🔗 Аудит текущей базы OpenCart</p>
+  </div>
+</div>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#3b82f6',
+      primaryTextColor: '#e2e8f0',
+      primaryBorderColor: '#475569',
+      lineColor: '#64748b',
+      secondaryColor: '#334155',
+      tertiaryColor: '#1e293b'
+    },
+    er: {
+      layoutDirection: 'TB',
+      minEntityWidth: 200,
+      entityPadding: 15,
+      fontSize: 12
+    }
+  });
+
+  function switchTab(e, tabId) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    e.target.classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+  }
+</script>
+</body>
+</html>
