@@ -40,13 +40,13 @@ interface BrakelineProduct {
   cross_refs: string | null
   application: string | null
   image: string | null
-  extra_images: string[]
-  specs: Specs
+  extra_images: string[] | null
+  specs: Specs | null
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
-const BRANDS = ['HEL', 'DORMAN', 'TRW', 'BOSCH', 'ATE'] as const
-const OUR_BRANDS = new Set(BRANDS as unknown as string[])
+const MAIN_BRANDS: string[] = ['HEL', 'DORMAN', 'TRW', 'BOSCH', 'ATE']
+const OUR_BRANDS = new Set(['HEL', 'DORMAN', 'TRW', 'BOSCH', 'ATE'])
 const PAGE_SIZE = 25
 
 const BRAND_COLORS: Record<string, { bg: string; text: string; border: string; solid: string; light: string }> = {
@@ -115,7 +115,8 @@ function parseCrossRefs(raw: string | null): { brand: string; num: string }[] {
   return results.slice(0, 80)
 }
 
-function getSpecEntries(specs: Specs): [string, string][] {
+function getSpecEntries(specs: Specs | null | undefined): [string, string][] {
+  if (!specs) return []
   return Object.entries(specs)
     .filter(([, v]) => v !== null && v !== undefined && v !== '')
     .map(([k, v]) => [SPEC_LABELS[k] || k, v as string])
@@ -396,6 +397,8 @@ function ProductCard({
   helProducts: HelMap
 }) {
   const [crossOpen, setCrossOpen] = useState(false)
+  const [oemAnalogs, setOemAnalogs] = useState<BrakelineProduct[] | null>(null)
+  const [oemLoading, setOemLoading] = useState(false)
 
   const specEntries = getSpecEntries(product.specs)
   const appLines = parseApplication(product.application)
@@ -405,6 +408,24 @@ function ProductCard({
   const ourCrossRefs = crossRefs.filter(r => OUR_BRANDS.has(r.brand))
   const otherCrossRefs = crossRefs.filter(r => !OUR_BRANDS.has(r.brand))
   const c = BRAND_COLORS[product.brand] || { solid: '#6B7280', light: '#F9FAFB', text: 'text-neutral-700', bg: 'bg-neutral-50', border: 'border-neutral-200' }
+
+  // For OEM-only records (no scheme, no image), search for analogs in main brands
+  const isOemOnly = !OUR_BRANDS.has(product.brand)
+  useEffect(() => {
+    if (!isOemOnly) { setOemAnalogs(null); return }
+    setOemLoading(true)
+    const oem = product.article
+    supabase
+      .from('brakeline_products')
+      .select('*')
+      .in('brand', MAIN_BRANDS)
+      .or(`original_oem.ilike.%${oem}%,oem.ilike.%${oem}%,cross_refs.ilike.%${oem}%`)
+      .limit(40)
+      .then(({ data }) => {
+        setOemAnalogs((data as BrakelineProduct[]) || [])
+        setOemLoading(false)
+      })
+  }, [product.id, isOemOnly, product.article])
 
   return (
     <div className="flex flex-col h-full bg-white overflow-hidden">
@@ -446,11 +467,71 @@ function ProductCard({
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
 
-        {/* HEL scheme or Photo gallery */}
-        {product.brand === 'HEL' && product.specs?.fitting1 ? (
-          <HelSchemeCard specs={product.specs} pm={helProducts} />
-        ) : (
-          <ImageGallery product={product} />
+        {/* OEM-only banner with analog search */}
+        {isOemOnly && (
+          <div className="p-5 border-b border-neutral-100">
+            <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-4 mb-4">
+              <div className="flex items-start gap-3">
+                <div className="shrink-0 w-9 h-9 rounded-full bg-amber-200 flex items-center justify-center">
+                  <Hash size={16} className="text-amber-800" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-bold text-amber-900">Оригинальный OEM номер</div>
+                  <div className="text-xs text-amber-800 mt-0.5">
+                    Это заводской номер производителя <span className="font-bold">{product.brand}</span>. Схемы и характеристик нет — ищем подходящие аналоги в каталоге.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 mb-2">
+              <ArrowUpRight size={13} className="text-[#ED1C24]" />
+              <span className="text-[11px] font-bold text-neutral-400 uppercase tracking-widest">
+                Аналоги в каталоге
+                {oemAnalogs && !oemLoading && <span className="ml-1 text-neutral-500">· {oemAnalogs.length}</span>}
+              </span>
+            </div>
+
+            {oemLoading ? (
+              <div className="flex justify-center py-6">
+                <Loader2 size={18} className="animate-spin text-neutral-300" />
+              </div>
+            ) : oemAnalogs && oemAnalogs.length > 0 ? (
+              <div className="space-y-1.5">
+                {oemAnalogs.map(a => {
+                  const ac = BRAND_COLORS[a.brand]
+                  return (
+                    <button
+                      key={a.id}
+                      onClick={() => onNavigate(a.article, a.brand)}
+                      className="w-full flex items-center gap-3 p-2 rounded-lg border border-neutral-200 hover:border-[#ED1C24] hover:bg-red-50/40 cursor-pointer transition-all group text-left"
+                    >
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border shrink-0 ${ac ? `${ac.bg} ${ac.text} ${ac.border}` : 'bg-neutral-100 text-neutral-600 border-neutral-200'}`}>
+                        {a.brand}
+                      </span>
+                      <span className="font-mono text-sm font-bold text-neutral-900 group-hover:text-[#ED1C24]">
+                        {a.article}
+                      </span>
+                      <ArrowUpRight size={12} className="ml-auto text-neutral-300 group-hover:text-[#ED1C24]" />
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="text-xs text-neutral-400 py-4 text-center bg-neutral-50 rounded-lg">
+                Аналоги не найдены
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* HEL scheme or Photo gallery — only for our brands */}
+        {!isOemOnly && (
+          product.brand === 'HEL' && product.specs?.fitting1 ? (
+            <HelSchemeCard specs={product.specs} pm={helProducts} />
+          ) : (
+            <ImageGallery product={product} />
+          )
         )}
 
         {/* Specs grid – always visible, prominent */}
@@ -610,13 +691,20 @@ export function BrakelineCatalog() {
       for (const p of (prodRes.data || []) as HelProduct[]) m.set(p.sku, p)
       setHelProducts(m)
     })
-    // Counts — one lightweight query per brand in parallel
-    Promise.all(
-      BRANDS.map(b =>
-        supabase.from('brakeline_products').select('id', { count: 'exact', head: true }).eq('brand', b)
-          .then(({ count }) => [b, count ?? 0] as [string, number])
-      )
-    ).then(r => setCounts(Object.fromEntries(r)))
+    // Load all brand counts dynamically
+    supabase.rpc('get_brand_counts').then(({ data, error }) => {
+      if (!error && data) {
+        setCounts(Object.fromEntries(data.map((r: { brand: string; cnt: number }) => [r.brand, r.cnt])))
+      } else {
+        // Fallback
+        Promise.all(
+          MAIN_BRANDS.map(b =>
+            supabase.from('brakeline_products').select('id', { count: 'exact', head: true }).eq('brand', b)
+              .then(({ count }) => [b, count ?? 0] as [string, number])
+          )
+        ).then(r => setCounts(Object.fromEntries(r)))
+      }
+    })
   }, [])
 
   // Load car models when make changes
@@ -747,35 +835,35 @@ export function BrakelineCatalog() {
             )}
           </div>
 
-          {/* Brand filters */}
+          {/* Brand filters — main + OEM dropdown */}
           <div className="flex items-center gap-1 flex-wrap">
-            <button
-              onClick={() => setBrand(null)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border cursor-pointer transition-all ${
-                brand === null
-                  ? 'bg-neutral-900 text-white border-neutral-900'
-                  : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'
-              }`}
-            >
+            <button onClick={() => setBrand(null)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border cursor-pointer transition-all ${!brand ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
               Все{!hasSelected && <span className="opacity-50 ml-1">{totalCount.toLocaleString()}</span>}
             </button>
-            {BRANDS.map(b => {
+            {MAIN_BRANDS.map(b => {
               const bc = BRAND_COLORS[b]
+              if (!bc) return null
               return (
-                <button
-                  key={b}
-                  onClick={() => setBrand(brand === b ? null : b)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border cursor-pointer transition-all ${
-                    brand === b
-                      ? `${bc.bg} ${bc.text} ${bc.border}`
-                      : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'
-                  }`}
-                >
-                  {b}{!hasSelected && <span className="opacity-50 ml-1">{(counts[b] ?? 0).toLocaleString()}</span>}
+                <button key={b} onClick={() => setBrand(brand === b ? null : b)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border cursor-pointer transition-all ${brand === b ? `${bc.bg} ${bc.text} ${bc.border}` : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
+                  {b}{!hasSelected && counts[b] ? <span className="opacity-50 ml-1">{counts[b].toLocaleString()}</span> : null}
                 </button>
               )
             })}
-
+            {/* OEM brands dropdown */}
+            {(() => {
+              const oemBrands = Object.keys(counts).filter(b => !new Set([...MAIN_BRANDS]).has(b)).sort()
+              if (!oemBrands.length) return null
+              return (
+                <select value={brand && !new Set([...MAIN_BRANDS]).has(brand) ? brand : ''}
+                  onChange={e => setBrand(e.target.value || null)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold border cursor-pointer transition-all ${brand && !new Set([...MAIN_BRANDS]).has(brand) ? 'bg-blue-50 text-blue-700 border-blue-300' : 'bg-white text-neutral-400 border-neutral-200'}`}>
+                  <option value="">OEM марки</option>
+                  {oemBrands.map(b => <option key={b} value={b}>{b} ({counts[b]})</option>)}
+                </select>
+              )
+            })()}
           </div>
 
           {/* Car make + model filter */}
