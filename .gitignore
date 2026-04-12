@@ -1,0 +1,24 @@
+.vercel
+
+# Рабочие скрипты и данные импорта
+*.json
+*.sql
+*.js
+!hel-pim/**
+
+# Excel и XML
+*.xlsx
+*.xml
+
+# Архивы и изображения
+*.tgz
+archive_analog/
+extracted_images/
+batches/
+archive_images.txt
+
+# Claude
+.claude/
+
+# Каталог фитингов (изображения)
+Фитинги/
