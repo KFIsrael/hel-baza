@@ -3,7 +3,7 @@ import { supabase } from './supabase'
 import {
   Database, Wrench, Plus, ChevronRight, ChevronLeft,
   Save, X, Check, AlertCircle, Copy, Trash2, FileSpreadsheet, Loader2,
-  Cloud, CloudOff, BookOpen
+  Cloud, CloudOff, BookOpen, GripVertical, FlipHorizontal
 } from 'lucide-react'
 import { BrakelineCatalog } from './BrakelineCatalog'
 import { FittingsCatalog } from './FittingsCatalog'
@@ -19,6 +19,7 @@ interface OemData {
 interface HoseLine {
   fitting1: string; fitting1_extra: string; insert1: string; bend1: string; bolt1: string; cut: string
   supports: string[]
+  supportsFlipped?: boolean[]  // зеркальное отображение фото крепления (по индексу supports)
   fitting2: string; fitting2_extra: string; insert2: string; bend2: string; bolt: string
 }
 interface SchemeData {
@@ -86,7 +87,7 @@ const emptyOem = (): OemData => ({
 })
 const emptyLine = (): HoseLine => ({
   fitting1: '', fitting1_extra: '', insert1: '', bend1: '', bolt1: '', cut: '',
-  supports: [],
+  supports: [], supportsFlipped: [],
   fitting2: '', fitting2_extra: '', insert2: '', bend2: '', bolt: ''
 })
 const emptyScheme = (oem = ''): SchemeData => ({
@@ -94,6 +95,13 @@ const emptyScheme = (oem = ''): SchemeData => ({
   lines: [emptyLine()], quantity: '', alignment: '', noteRus: '', noteEng: '',
   hoseColor: 'CLEAR'
 })
+
+// HEL-код / артикул шланга = "RT" + оригинальный OEM (только буквы/цифры, верхний регистр).
+// Единственный источник правды для артикула — оригинальный OEM номер.
+const makeHelCode = (oem: string): string => {
+  const clean = (oem || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
+  return clean ? 'RT' + clean : ''
+}
 
 // ==================== SUPABASE DATA LAYER ====================
 const db = {
@@ -146,14 +154,21 @@ const db = {
         if (line.bolt1) specs.bolt1 = line.bolt1
         if (line.bolt) specs.bolt2 = line.bolt
         if (line.supports?.length) {
-          line.supports.filter(Boolean).forEach((s, si) => { specs[`support${si + 1}`] = s })
+          let n = 0
+          line.supports.forEach((s, si) => {
+            if (!s) return
+            n++
+            specs[`support${n}`] = s
+            if (line.supportsFlipped?.[si]) specs[`support${n}_flip`] = '1'
+          })
         }
       }
       if (s.hoseColor) specs.hose_color = s.hoseColor
       specs.position = s.position
       specs.side = s.side
 
-      const article = record.oem.helCode || ('HEL-' + record.oem.oem)
+      // Артикул всегда RT + оригинальный OEM. helCode/HEL- — только запасной вариант, если OEM пуст.
+      const article = makeHelCode(record.oem.oem) || record.oem.helCode || ('HEL-' + record.oem.oem)
       const crossRefs = record.oem.analogs
         .filter(a => a.brand && a.code)
         .map(a => `${a.brand.toUpperCase()} ${a.code}`)
@@ -508,13 +523,36 @@ function PartThumb({ sku, productMap, size = 'md', mirror = false }: { sku: stri
   return null
 }
 
-function HoseDiagram({ line, productMap, hoseColor }: { line: HoseLine; productMap?: Map<string, Product>; hoseColor?: string }) {
+function HoseDiagram({ line, productMap, hoseColor, onSupportsChange }: {
+  line: HoseLine; productMap?: Map<string, Product>; hoseColor?: string
+  // Если передан — крепления интерактивны (drag-and-drop порядок + зеркало). Иначе режим только чтения.
+  onSupportsChange?: (supports: string[], supportsFlipped: boolean[]) => void
+}) {
   const f1 = line.fitting1 || ''
   const f2 = line.fitting2 || ''
   const cut = line.cut || '—'
   const pm = productMap || new Map()
   const hc = HOSE_COLORS.find(c => c.code === hoseColor)?.hex || '#555'
-  const supports = (line.supports || []).filter(Boolean)
+  const rawSupports = line.supports || []
+  const rawFlipped = rawSupports.map((_, i) => line.supportsFlipped?.[i] ?? false)
+  const supports = rawSupports.filter(Boolean)
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const interactive = !!onSupportsChange
+
+  // Перемещение крепления (drag-and-drop) — двигаем синхронно код и флаг зеркала
+  const moveSupport = (from: number, to: number) => {
+    if (!onSupportsChange || from === to) return
+    const s = [...rawSupports]; const f = [...rawFlipped]
+    const [ms] = s.splice(from, 1); const [mf] = f.splice(from, 1)
+    s.splice(to, 0, ms); f.splice(to, 0, mf)
+    onSupportsChange(s, f)
+  }
+  // Зеркальное отражение фото крепления
+  const toggleFlip = (idx: number) => {
+    if (!onSupportsChange) return
+    const f = [...rawFlipped]; f[idx] = !f[idx]
+    onSupportsChange([...rawSupports], f)
+  }
 
   return (
     <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-5 mb-4 select-none overflow-x-auto">
@@ -610,17 +648,37 @@ function HoseDiagram({ line, productMap, hoseColor }: { line: HoseLine; productM
                 </>
               )}
             </div>
-            {/* Supports — center */}
-            <div className="flex-1 flex items-center justify-center gap-4 flex-wrap">
-              {supports.map((s, i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  <PartThumb sku={s} productMap={pm} size="sm" />
+            {/* Supports — center (drag-and-drop порядок + зеркало) */}
+            <div className="flex-1 flex items-center justify-center gap-3 flex-wrap">
+              {rawSupports.map((s, i) => s ? (
+                <div key={i}
+                  draggable={interactive}
+                  onDragStart={() => setDragIdx(i)}
+                  onDragOver={interactive ? (e => e.preventDefault()) : undefined}
+                  onDrop={() => { if (dragIdx !== null) moveSupport(dragIdx, i); setDragIdx(null) }}
+                  onDragEnd={() => setDragIdx(null)}
+                  className={cl(
+                    'flex items-center gap-1.5 rounded-lg px-1.5 py-1 border transition-all',
+                    interactive ? 'cursor-grab hover:bg-white hover:border-neutral-200 border-transparent active:cursor-grabbing' : 'border-transparent',
+                    dragIdx === i && 'opacity-40 ring-2 ring-[#ED1C24]'
+                  )}>
+                  {interactive && <GripVertical size={12} className="text-neutral-300 shrink-0" />}
+                  <PartThumb sku={s} productMap={pm} size="sm" mirror={rawFlipped[i]} />
                   <div>
                     <div className="text-[10px] font-bold text-neutral-500">Креп {i + 1}</div>
                     <div className="font-mono text-[10px] text-amber-600 font-bold">{s}</div>
+                    {interactive && (
+                      <button onClick={() => toggleFlip(i)} title="Отразить фото крепления зеркально"
+                        className={cl(
+                          'mt-0.5 inline-flex items-center gap-1 text-[9px] font-semibold rounded px-1 py-0.5 cursor-pointer transition-colors',
+                          rawFlipped[i] ? 'bg-[#ED1C24] text-white' : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'
+                        )}>
+                        <FlipHorizontal size={10} /> {rawFlipped[i] ? 'Зеркало' : 'Отразить'}
+                      </button>
+                    )}
                   </div>
                 </div>
-              ))}
+              ) : null)}
             </div>
             {/* Bolt right — under fitting 2 */}
             <div className="shrink-0 w-[90px] flex flex-col items-center">
@@ -724,7 +782,9 @@ function Step1Oem({ data, onChange }: { data: OemData; onChange: (d: OemData) =>
   const uA = (i: number, k: keyof Analog, v: string) => {
     const a = [...data.analogs]; a[i] = { ...a[i], [k]: v }; u('analogs', a)
   }
-  const auto = () => { if (data.oem) u('helCode', 'RT' + data.oem.replace(/[^a-zA-Z0-9]/g, '')) }
+  const auto = () => { if (data.oem) u('helCode', makeHelCode(data.oem)) }
+  // OEM — единственный источник артикула: при вводе сразу синхронизируем helCode = RT + OEM.
+  const setOem = (val: string) => onChange({ ...data, oem: val, helCode: makeHelCode(val) })
 
   // OEM lookup
   const [lookup, setLookup] = useState<OemLookupResult>({ status: 'none' })
@@ -816,7 +876,7 @@ function Step1Oem({ data, onChange }: { data: OemData; onChange: (d: OemData) =>
       <Card title="Основная информация">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <Field label="OEM номер" required hint="Оригинальный номер производителя">
-            <input value={data.oem} onChange={e => u('oem', e.target.value)} placeholder="9094702F58" className="font-mono" />
+            <input value={data.oem} onChange={e => setOem(e.target.value)} placeholder="9094702F58" className="font-mono" />
             {lookup.status === 'searching' && <span className="text-[10px] text-neutral-400 mt-1 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Поиск в базе...</span>}
             {lookup.status === 'has_hel' && (
               <div className="mt-1 px-2.5 py-1.5 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700 flex items-center gap-1.5">
@@ -844,7 +904,7 @@ function Step1Oem({ data, onChange }: { data: OemData; onChange: (d: OemData) =>
               <span className="text-[10px] text-neutral-400 mt-1">Новый OEM — не найден в базе</span>
             )}
           </Field>
-          <Field label="HEL Code" required hint="Уникальный ID в системе">
+          <Field label="HEL Code" required hint="Артикул = RT + OEM (заполняется автоматически)">
             <div className="flex gap-2">
               <input value={data.helCode} onChange={e => u('helCode', e.target.value)} placeholder="RT9094702F58" className="font-mono" />
               <button onClick={auto} className="shrink-0 px-3 py-2 bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 rounded-lg text-xs text-neutral-600 cursor-pointer font-medium transition-colors">
@@ -1057,7 +1117,8 @@ function Step2Scheme({ data, onChange, catalogs, productMap, priceTier, onTierCh
 
           <div className="p-5">
             {/* Visual hose diagram */}
-            <HoseDiagram line={line} productMap={productMap} hoseColor={data.hoseColor} />
+            <HoseDiagram line={line} productMap={productMap} hoseColor={data.hoseColor}
+              onSupportsChange={(s, f) => { const lines = [...data.lines]; lines[i] = { ...lines[i], supports: s, supportsFlipped: f }; onChange({ ...data, lines }) }} />
 
             {/* Form fields */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -1093,13 +1154,13 @@ function Step2Scheme({ data, onChange, catalogs, productMap, priceTier, onTierCh
                 </Field>
                 {(line.supports || []).map((sup, si) => (
                   <Field key={si} label={<>Крепление {si + 1}<PriceBadge amount={getPrice(productMap, sup, priceTier)} />{(line.supports || []).length > 1 && (
-                    <button onClick={() => { const s = [...(line.supports || [])]; s.splice(si, 1); const lines = [...data.lines]; lines[i] = { ...lines[i], supports: s }; onChange({ ...data, lines }) }}
+                    <button onClick={() => { const s = [...(line.supports || [])]; const f = [...(line.supportsFlipped || [])]; s.splice(si, 1); f.splice(si, 1); const lines = [...data.lines]; lines[i] = { ...lines[i], supports: s, supportsFlipped: f }; onChange({ ...data, lines }) }}
                       className="ml-1 text-[#ED1C24] hover:text-red-700 cursor-pointer"><X size={10} /></button>
                   )}</>}>
                     <CatalogSelect value={sup} onChange={v => { const s = [...(line.supports || [])]; s[si] = v; const lines = [...data.lines]; lines[i] = { ...lines[i], supports: s }; onChange({ ...data, lines }) }} catalog={catalogs.supports} placeholder="Выбрать" />
                   </Field>
                 ))}
-                <button onClick={() => { const s = [...(line.supports || []), '']; const lines = [...data.lines]; lines[i] = { ...lines[i], supports: s }; onChange({ ...data, lines }) }}
+                <button onClick={() => { const s = [...(line.supports || []), '']; const f = [...(line.supportsFlipped || []), false]; const lines = [...data.lines]; lines[i] = { ...lines[i], supports: s, supportsFlipped: f }; onChange({ ...data, lines }) }}
                   className="text-xs text-neutral-400 hover:text-neutral-700 cursor-pointer flex items-center gap-1 mt-1">
                   <Plus size={12} /> Добавить крепление
                 </button>
