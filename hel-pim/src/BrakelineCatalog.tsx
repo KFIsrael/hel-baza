@@ -529,14 +529,12 @@ function ProductCard({
               <div className="font-mono text-xs text-neutral-500 mt-1">OEM: <span className="text-neutral-700">{product.oem}</span></div>
             )}
           </div>
-          <div className="flex items-center gap-1 shrink-0">
-            {onBack && (
-              <button onClick={onBack}
-                className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-neutral-200 hover:bg-neutral-100 text-neutral-500 cursor-pointer transition-colors flex items-center gap-1">
-                <ChevronLeft size={13} /> Назад
-              </button>
-            )}
-            <button onClick={onClose}
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={onBack || onClose}
+              className="px-3 py-1.5 text-sm font-semibold rounded-lg border border-neutral-300 bg-white hover:bg-neutral-100 text-neutral-700 cursor-pointer transition-colors flex items-center gap-1 shadow-sm">
+              <ChevronLeft size={15} /> {onBack ? 'Назад' : 'К списку'}
+            </button>
+            <button onClick={onClose} title="Закрыть к списку"
               className="p-1.5 hover:bg-white/80 rounded-lg text-neutral-400 hover:text-neutral-700 cursor-pointer shrink-0 transition-colors">
               <X size={16} />
             </button>
@@ -891,7 +889,7 @@ export function BrakelineCatalog() {
     <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
 
       {/* ── LEFT: List panel (scrollable) ────────────────────────────────── */}
-      <div className={`flex flex-col bg-white min-h-0 overflow-hidden transition-all duration-300 ease-in-out ${selected ? 'hidden md:flex w-[400px] shrink-0' : 'flex-1'}`}>
+      <div className={`flex flex-col bg-white min-h-0 overflow-hidden transition-all duration-300 ease-in-out ${selected ? 'hidden' : 'flex-1'}`}>
         <div
           className="flex flex-col bg-white h-full"
         >
@@ -1057,9 +1055,9 @@ export function BrakelineCatalog() {
         </div>
       </div>
 
-      {/* ── RIGHT: Product card ───────────────────── */}
+      {/* ── Product card — на всю рабочую область ───────────────────── */}
       {selected && (
-        <div className="flex-1 min-w-0 md:border-l-2 border-neutral-200 overflow-hidden">
+        <div className="flex-1 min-w-0 overflow-hidden">
           <ProductCard
             product={selected}
             onClose={() => { setSelected(null); setNavHistory([]) }}
