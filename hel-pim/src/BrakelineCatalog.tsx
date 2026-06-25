@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
 import {
-  Search, X, ChevronLeft, ChevronRight,
+  Search, X, ChevronLeft, ChevronRight, Pencil,
   Tag, Car, Ruler, GitMerge, Hash, ChevronDown, ChevronUp, Loader2, ArrowUpRight, Package
 } from 'lucide-react'
+import { HelCardEditor } from './HelCardEditor'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-interface Specs {
+export interface Specs {
   length?: string | null; length_1?: string | null; length_2?: string | null
   total_length_1?: string | null; overall_length?: string | null
   thread_measurement_1?: string | null; thread_measurement_2?: string | null
@@ -30,7 +31,7 @@ interface Specs {
   [key: string]: string | null | undefined
 }
 
-interface BrakelineProduct {
+export interface BrakelineProduct {
   id: number
   brand: string
   article: string
@@ -132,19 +133,19 @@ function getSpecEntries(specs: Specs | null | undefined): [string, string][] {
 }
 
 // Шайбы каталога: 3 для серии H161, иначе 2
-const WASHER_SKU_CAT = 'CCW-10'
-const washersForBoltCat = (sku: string): number => {
+export const WASHER_SKU_CAT = 'CCW-10'
+export const washersForBoltCat = (sku: string): number => {
   const m = (sku || '').toUpperCase().match(/^H?(\d{3})/)
   return m && m[1] === '161' ? 3 : 2
 }
 
-interface SchemeLine {
+export interface SchemeLine {
   fitting1: string; insert1: string; bend1: string; bend1_orient: string; bolt1: string
   cut: string; supports: string[]; supports_flipped: boolean[]
   fitting2: string; insert2: string; bend2: string; bend2_orient: string; bolt2: string
 }
 // Нормализованные сегменты: из specs.lines[] (новый формат) или синтез из плоских ключей (старый)
-function getSchemeLines(specs: Specs): SchemeLine[] {
+export function getSchemeLines(specs: Specs): SchemeLine[] {
   const norm = (o: Record<string, unknown>): SchemeLine => ({
     fitting1: String(o.fitting1 || ''), insert1: String(o.insert1 || ''),
     bend1: String(o.bend1 || ''), bend1_orient: String(o.bend1_orient || ''), bolt1: String(o.bolt1 || ''),
@@ -227,10 +228,10 @@ function BrandBadge({ brand, large = false }: { brand: string; large?: boolean }
 }
 
 // ── HEL Product helpers ───────────────────────────────────────────────────────
-interface HelProduct { id: string; sku: string; name: string; image_url: string | null; price_dealer: number | null }
-type HelMap = Map<string, HelProduct>
+export interface HelProduct { id: string; sku: string; name: string; image_url: string | null; price_dealer: number | null }
+export type HelMap = Map<string, HelProduct>
 
-const HOSE_COLORS: Record<string, string> = {
+export const HOSE_COLORS: Record<string, string> = {
   CLEAR: '#CCCCCC', BLACK: '#1a1a1a', BLUE: '#0066CC', RED: '#CC0000',
   'GREEN-KAWASAKI': '#00AA00', YELLOW: '#CCCC00', ORANGE: '#CC6600',
   'PURPLE-TRANS': '#660099', CARBON: '#444', GOLD: '#DAA520',
@@ -258,7 +259,7 @@ function fmtRub(n: number): string {
   return n.toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' ₽'
 }
 
-function HelSchemeCard({ specs, pm }: { specs: Specs; pm: HelMap }) {
+export function HelSchemeCard({ specs, pm }: { specs: Specs; pm: HelMap }) {
   const lines = getSchemeLines(specs)
   const getP = (sku: string) => (sku ? (pm.get(sku)?.price_dealer ?? 0) : 0)
   const hoseProduct = Array.from(pm.values()).find(p => p.sku === 'H707')
@@ -468,17 +469,32 @@ function ImageGallery({ product }: { product: BrakelineProduct }) {
 
 // ── Product Card (right panel) ─────────────────────────────────────────────────
 function ProductCard({
-  product, onClose, onNavigate, onBack, helProducts
+  product, onClose, onNavigate, onBack, helProducts, onUpdated
 }: {
   product: BrakelineProduct
   onClose: () => void
   onNavigate: (article: string, brand: string) => void
   onBack: (() => void) | null
   helProducts: HelMap
+  onUpdated?: (p: BrakelineProduct) => void
 }) {
   const [crossOpen, setCrossOpen] = useState(false)
   const [oemAnalogs, setOemAnalogs] = useState<BrakelineProduct[] | null>(null)
   const [oemLoading, setOemLoading] = useState(false)
+  const [editing, setEditing] = useState(false)
+  useEffect(() => { setEditing(false) }, [product.id])
+  const isHel = product.brand === 'HEL'
+
+  if (editing) {
+    return (
+      <HelCardEditor
+        product={product}
+        helProducts={helProducts}
+        onSaved={(p) => { onUpdated?.(p); setEditing(false) }}
+        onCancel={() => setEditing(false)}
+      />
+    )
+  }
 
   const specEntries = getSpecEntries(product.specs)
   const appLines = parseApplication(product.application)
@@ -534,6 +550,12 @@ function ProductCard({
               className="px-3 py-1.5 text-sm font-semibold rounded-lg border border-neutral-300 bg-white hover:bg-neutral-100 text-neutral-700 cursor-pointer transition-colors flex items-center gap-1 shadow-sm">
               <ChevronLeft size={15} /> {onBack ? 'Назад' : 'К списку'}
             </button>
+            {isHel && (
+              <button onClick={() => setEditing(true)}
+                className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-[#ED1C24] hover:bg-[#d41920] text-white cursor-pointer transition-colors flex items-center gap-1 shadow-sm">
+                <Pencil size={14} /> Редактировать
+              </button>
+            )}
             <button onClick={onClose} title="Закрыть к списку"
               className="p-1.5 hover:bg-white/80 rounded-lg text-neutral-400 hover:text-neutral-700 cursor-pointer shrink-0 transition-colors">
               <X size={16} />
@@ -1068,6 +1090,7 @@ export function BrakelineCatalog() {
               setSelected(prev)
             } : null}
             helProducts={helProducts}
+            onUpdated={(p) => setSelected(p)}
           />
         </div>
       )}
