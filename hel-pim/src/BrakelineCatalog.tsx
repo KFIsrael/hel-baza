@@ -1077,9 +1077,10 @@ export function BrakelineCatalog() {
         </div>
       </div>
 
-      {/* ── Product card — на всю рабочую область ───────────────────── */}
+      {/* ── Product card — центрированная колонка в рабочей области ───────── */}
       {selected && (
-        <div className="flex-1 min-w-0 overflow-hidden">
+        <div className="flex-1 min-w-0 overflow-hidden flex justify-center bg-neutral-100">
+          <div className="w-full max-w-5xl h-full bg-white shadow-sm border-x border-neutral-200 overflow-hidden">
           <ProductCard
             product={selected}
             onClose={() => { setSelected(null); setNavHistory([]) }}
@@ -1092,6 +1093,7 @@ export function BrakelineCatalog() {
             helProducts={helProducts}
             onUpdated={(p) => setSelected(p)}
           />
+          </div>
         </div>
       )}
     </div>
