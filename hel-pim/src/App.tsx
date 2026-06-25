@@ -17,10 +17,10 @@ interface OemData {
   source: string; confidence: string; comment: string; applicability: string
 }
 interface HoseLine {
-  fitting1: string; fitting1_extra: string; insert1: string; bend1: string; bolt1: string; cut: string
+  fitting1: string; fitting1_extra: string; insert1: string; bend1: string; bend1_orient?: string; bolt1: string; cut: string
   supports: string[]
   supportsFlipped?: boolean[]  // зеркальное отображение фото крепления (по индексу supports)
-  fitting2: string; fitting2_extra: string; insert2: string; bend2: string; bolt: string
+  fitting2: string; fitting2_extra: string; insert2: string; bend2: string; bend2_orient?: string; bolt: string
 }
 interface SchemeData {
   oemNumber: string; position: string; side: string; totalLength: string
@@ -66,12 +66,21 @@ type CatalogItem = { code: string; desc: string; group?: string }
 interface Catalogs {
   fittings: CatalogItem[]
   angles: CatalogItem[]
+  bendOrients: CatalogItem[]
   inserts: CatalogItem[]
   bolts: CatalogItem[]
   supports: CatalogItem[]
   washers: CatalogItem[]
 }
-const EMPTY_CATALOGS: Catalogs = { fittings: [], angles: [], inserts: [], bolts: [], supports: [], washers: [] }
+const EMPTY_CATALOGS: Catalogs = { fittings: [], angles: [], bendOrients: [], inserts: [], bolts: [], supports: [], washers: [] }
+
+// Шайбы: по умолчанию 2 на болт; для серии H161 — 3, для H160 — 2.
+const WASHER_SKU = 'CCW-10'
+const washersForBolt = (boltSku: string): number => {
+  const m = (boltSku || '').toUpperCase().match(/^H?(\d{3})/)
+  if (m && m[1] === '161') return 3
+  return 2 // H160 и по умолчанию
+}
 
 const FITTING_CAT_LABELS: Record<string, string> = {
   fitting_female: 'Мама', fitting_male: 'Папа', fitting_banjo: 'Банджо',
@@ -86,9 +95,9 @@ const emptyOem = (): OemData => ({
   source: '', confidence: '', comment: '', applicability: ''
 })
 const emptyLine = (): HoseLine => ({
-  fitting1: '', fitting1_extra: '', insert1: '', bend1: '', bolt1: '', cut: '',
+  fitting1: '', fitting1_extra: '', insert1: '', bend1: '', bend1_orient: '', bolt1: '', cut: '',
   supports: [], supportsFlipped: [],
-  fitting2: '', fitting2_extra: '', insert2: '', bend2: '', bolt: ''
+  fitting2: '', fitting2_extra: '', insert2: '', bend2: '', bend2_orient: '', bolt: ''
 })
 const emptyScheme = (oem = ''): SchemeData => ({
   oemNumber: oem, position: 'FRONT', side: 'LEFT/RIGHT', totalLength: '',
@@ -141,7 +150,25 @@ const db = {
     // Auto-publish to catalog when complete
     if (record.status === 'complete' && record.scheme) {
       const s = record.scheme
-      const specs: Record<string, string> = {}
+      const specs: Record<string, unknown> = {}
+
+      // Полный массив сегментов (источник истины, без потерь) — все шланги записи.
+      specs.lines = s.lines.map(ln => {
+        const rawSup = ln.supports || []
+        const keep = rawSup.map((sk, idx) => ({ sk, fl: ln.supportsFlipped?.[idx] ?? false })).filter(x => x.sk)
+        return {
+          fitting1: ln.fitting1 || '', fitting1_extra: ln.fitting1_extra || '',
+          insert1: ln.insert1 || '', bend1: ln.bend1 || '', bend1_orient: ln.bend1_orient || '',
+          bolt1: ln.bolt1 || '', bolt1_washer: ln.bolt1 ? WASHER_SKU : '', bolt1_washer_qty: ln.bolt1 ? washersForBolt(ln.bolt1) : 0,
+          cut: ln.cut || '',
+          supports: keep.map(x => x.sk), supports_flipped: keep.map(x => x.fl),
+          fitting2: ln.fitting2 || '', fitting2_extra: ln.fitting2_extra || '',
+          insert2: ln.insert2 || '', bend2: ln.bend2 || '', bend2_orient: ln.bend2_orient || '',
+          bolt2: ln.bolt || '', bolt2_washer: ln.bolt ? WASHER_SKU : '', bolt2_washer_qty: ln.bolt ? washersForBolt(ln.bolt) : 0,
+        }
+      })
+
+      // Плоский слой = шланг #1 (совместимость с текущим читателем каталога)
       const line = s.lines[0]
       if (line) {
         if (line.fitting1) specs.fitting1 = line.fitting1
@@ -150,29 +177,44 @@ const db = {
         if (line.fitting2) specs.fitting2 = line.fitting2
         if (line.insert2) specs.insert2 = line.insert2
         if (line.bend1) specs.bend1 = line.bend1
+        if (line.bend1_orient) specs.bend1_orient = line.bend1_orient
         if (line.bend2) specs.bend2 = line.bend2
-        if (line.bolt1) specs.bolt1 = line.bolt1
-        if (line.bolt) specs.bolt2 = line.bolt
+        if (line.bend2_orient) specs.bend2_orient = line.bend2_orient
+        if (line.bolt1) { specs.bolt1 = line.bolt1; specs.bolt1_washer = WASHER_SKU; specs.bolt1_washer_qty = washersForBolt(line.bolt1) }
+        if (line.bolt) { specs.bolt2 = line.bolt; specs.bolt2_washer = WASHER_SKU; specs.bolt2_washer_qty = washersForBolt(line.bolt) }
         if (line.supports?.length) {
           let n = 0
-          line.supports.forEach((s, si) => {
-            if (!s) return
+          line.supports.forEach((sk, si) => {
+            if (!sk) return
             n++
-            specs[`support${n}`] = s
+            specs[`support${n}`] = sk
             if (line.supportsFlipped?.[si]) specs[`support${n}_flip`] = '1'
           })
         }
       }
+      // Уровень схемы / мета
       if (s.hoseColor) specs.hose_color = s.hoseColor
       specs.position = s.position
       specs.side = s.side
+      if (s.totalLength) specs.overall_length = s.totalLength
+      if (s.quantity) specs.quantity = s.quantity
+      if (s.noteRus) specs.note_rus = s.noteRus
+      if (s.noteEng) specs.note_eng = s.noteEng
+      if (record.oem.partName) specs.part_name = record.oem.partName
+      if (record.oem.source) specs.source = record.oem.source
+      if (record.oem.confidence) specs.confidence = record.oem.confidence
+      if (record.oem.comment) specs.comment = record.oem.comment
 
       // Артикул всегда RT + оригинальный OEM. helCode/HEL- — только запасной вариант, если OEM пуст.
       const article = makeHelCode(record.oem.oem) || record.oem.helCode || ('HEL-' + record.oem.oem)
+      // Аналоги (бренд+код) → cross_refs
       const crossRefs = record.oem.analogs
         .filter(a => a.brand && a.code)
         .map(a => `${a.brand.toUpperCase()} ${a.code}`)
         .join(', ')
+      // OEM-замены не теряем: original_oem = основной OEM + все кросс-OEM
+      const crossOems = (record.oem.crossRefs || []).map(c => c.oem).filter(Boolean)
+      const originalOem = Array.from(new Set([record.oem.oem, ...crossOems].filter(Boolean))).join(', ')
       const application = record.oem.applicability || ''
 
       await supabase.from('brakeline_products').upsert({
@@ -180,7 +222,7 @@ const db = {
         brand: 'HEL',
         article,
         oem: record.oem.oem || null,
-        original_oem: record.oem.oem || null,
+        original_oem: originalOem || record.oem.oem || null,
         status: 1,
         cross_refs: crossRefs || null,
         application: application || null,
@@ -197,14 +239,16 @@ const db = {
   },
 
   async loadCatalogs(): Promise<Catalogs> {
-    const [fittingsRes, categoriesRes, anglesRes] = await Promise.all([
+    const [fittingsRes, categoriesRes, anglesRes, orientsRes] = await Promise.all([
       supabase.from('fittings').select('sku, name, size, category_id').eq('is_active', true).order('sku'),
       supabase.from('fitting_categories').select('id, name'),
       supabase.from('fitting_angles').select('name, degrees').order('sort_order'),
+      supabase.from('bend_orientations').select('name').eq('is_active', true).order('sort_order'),
     ])
     if (fittingsRes.error) throw new Error(fittingsRes.error.message)
     if (categoriesRes.error) throw new Error(categoriesRes.error.message)
     if (anglesRes.error) throw new Error(anglesRes.error.message)
+    if (orientsRes.error) throw new Error(orientsRes.error.message)
 
     const catMap = new Map(
       (categoriesRes.data || []).map((c: { id: number; name: string }) => [c.id, c.name])
@@ -222,7 +266,11 @@ const db = {
         desc: `${a.name}${a.degrees ? ` (${a.degrees}°)` : ''}`,
       })),
     ]
-    return { fittings, angles, inserts: [], bolts: [], supports: [], washers: [] }
+    const bendOrients: CatalogItem[] = [
+      { code: '', desc: '—' },
+      ...(orientsRes.data || []).map((o: { name: string }) => ({ code: o.name, desc: o.name })),
+    ]
+    return { fittings, angles, bendOrients, inserts: [], bolts: [], supports: [], washers: [] }
   },
 
   async loadProducts(): Promise<Product[]> {
@@ -292,7 +340,8 @@ function fmtRub(n: number): string {
 interface LinePriceBreakdown {
   fitting1: number; insert1: number; bolt1: number; hose: number
   fitting2: number; insert2: number; bolt: number
-  supports: number; sleeves: number; total: number
+  supports: number; sleeves: number; washers: number
+  washerQty: number; total: number
 }
 
 function calcLinePrice(line: HoseLine, hoseColor: string, pm: Map<string, Product>, tier: PriceTier): LinePriceBreakdown {
@@ -308,8 +357,11 @@ function calcLinePrice(line: HoseLine, hoseColor: string, pm: Map<string, Produc
   const blt = getPrice(pm, line.bolt, tier)
   const supTotal = (line.supports || []).reduce((sum, s) => sum + getPrice(pm, s, tier), 0)
   const sleeves = getPrice(pm, 'H707-03C', tier) * 2
-  const total = f1 + ins1 + b1 + ins2 + hose + f2 + blt + supTotal + sleeves
-  return { fitting1: f1, insert1: ins1, bolt1: b1, insert2: ins2, hose, fitting2: f2, bolt: blt, supports: supTotal, sleeves, total }
+  // Шайбы: по 2 (или 3 для H161) на каждый присутствующий болт
+  const washerQty = (line.bolt1 ? washersForBolt(line.bolt1) : 0) + (line.bolt ? washersForBolt(line.bolt) : 0)
+  const washers = washerQty * getPrice(pm, WASHER_SKU, tier)
+  const total = f1 + ins1 + b1 + ins2 + hose + f2 + blt + supTotal + sleeves + washers
+  return { fitting1: f1, insert1: ins1, bolt1: b1, insert2: ins2, hose, fitting2: f2, bolt: blt, supports: supTotal, sleeves, washers, washerQty, total }
 }
 
 // ==================== UI PRIMITIVES ====================
@@ -568,6 +620,7 @@ function HoseDiagram({ line, productMap, hoseColor, onSupportsChange }: {
               <div className="text-[10px] font-bold text-[#ED1C24] mt-1">Фитинг 1</div>
               <div className="font-mono text-[10px] text-neutral-700 font-bold text-center">{f1 || '—'}</div>
               {line.bend1 && <div className="text-[10px] text-amber-600 font-semibold">{line.bend1}</div>}
+              {line.bend1_orient && <div className="text-[10px] text-blue-600 font-semibold">↪ {line.bend1_orient}</div>}
             </div>
             {line.insert1 && (
               <div className="flex flex-col items-center w-[84px]">
@@ -631,6 +684,7 @@ function HoseDiagram({ line, productMap, hoseColor, onSupportsChange }: {
               <div className="text-[10px] font-bold text-[#ED1C24] mt-1">Фитинг 2</div>
               <div className="font-mono text-[10px] text-neutral-700 font-bold text-center">{f2 || '—'}</div>
               {line.bend2 && <div className="text-[10px] text-amber-600 font-semibold">{line.bend2}</div>}
+              {line.bend2_orient && <div className="text-[10px] text-blue-600 font-semibold">↪ {line.bend2_orient}</div>}
             </div>
           </div>
         </div>
@@ -645,6 +699,7 @@ function HoseDiagram({ line, productMap, hoseColor, onSupportsChange }: {
                   <PartThumb sku={line.bolt1} productMap={pm} size="sm" mirror />
                   <div className="text-[10px] font-bold text-neutral-500 mt-1">Болт</div>
                   <div className="font-mono text-[10px] text-neutral-700 font-bold">{line.bolt1}</div>
+                  <div className="text-[9px] text-neutral-500 mt-0.5">Шайбы: {WASHER_SKU} ×{washersForBolt(line.bolt1)}</div>
                 </>
               )}
             </div>
@@ -687,6 +742,7 @@ function HoseDiagram({ line, productMap, hoseColor, onSupportsChange }: {
                   <PartThumb sku={line.bolt} productMap={pm} size="sm" />
                   <div className="text-[10px] font-bold text-neutral-500 mt-1">Болт</div>
                   <div className="font-mono text-[10px] text-neutral-700 font-bold">{line.bolt}</div>
+                  <div className="text-[9px] text-neutral-500 mt-0.5">Шайбы: {WASHER_SKU} ×{washersForBolt(line.bolt)}</div>
                 </>
               )}
             </div>
@@ -1139,6 +1195,9 @@ function Step2Scheme({ data, onChange, catalogs, productMap, priceTier, onTierCh
                 <Field label="Загиб / Угол">
                   <CatalogSelect value={line.bend1} onChange={v => uLine(i, 'bend1', v)} catalog={catalogs.angles} placeholder="Прямой" />
                 </Field>
+                <Field label="Ориентация загиба">
+                  <CatalogSelect value={line.bend1_orient || ''} onChange={v => uLine(i, 'bend1_orient', v)} catalog={catalogs.bendOrients} placeholder="Не задана" />
+                </Field>
                 <Field label={<>Болт (Banjo) лев.<PriceBadge amount={lp.bolt1} /></>}>
                   <CatalogSelect value={line.bolt1} onChange={v => uLine(i, 'bolt1', v)} catalog={catalogs.bolts} placeholder="Нет болта" />
                 </Field>
@@ -1182,6 +1241,9 @@ function Step2Scheme({ data, onChange, catalogs, productMap, priceTier, onTierCh
                 </Field>
                 <Field label="Загиб / Угол">
                   <CatalogSelect value={line.bend2} onChange={v => uLine(i, 'bend2', v)} catalog={catalogs.angles} placeholder="Прямой" />
+                </Field>
+                <Field label="Ориентация загиба">
+                  <CatalogSelect value={line.bend2_orient || ''} onChange={v => uLine(i, 'bend2_orient', v)} catalog={catalogs.bendOrients} placeholder="Не задана" />
                 </Field>
                 <Field label={<>Болт (Banjo)<PriceBadge amount={lp.bolt} /></>}>
                   <CatalogSelect value={line.bolt} onChange={v => uLine(i, 'bolt', v)} catalog={catalogs.bolts} placeholder="Нет болта" />
@@ -1357,6 +1419,7 @@ function Step3Review({ oem, scheme, productMap, priceTier, onTierChange }: {
             })
           }
           items.push({ label: 'Гильзы H707-03C x2', sku: 'H707-03C', price: lp.sleeves })
+          if (lp.washers > 0) items.push({ label: `Шайбы ${WASHER_SKU} x${lp.washerQty}`, sku: WASHER_SKU, price: lp.washers })
           return (
             <div key={i} className="mb-4">
               <div className="text-xs font-bold text-neutral-500 mb-2">Шланг #{i + 1}</div>

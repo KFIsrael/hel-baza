@@ -115,11 +115,50 @@ function parseCrossRefs(raw: string | null): { brand: string; num: string }[] {
   return results.slice(0, 80)
 }
 
+// Ключи, которые рендерятся структурно (схема сборки HEL), не показываем в общей таблице характеристик
+const STRUCT_SPEC_KEYS = new Set([
+  'lines', 'fitting1', 'fitting2', 'insert1', 'insert2', 'bend1', 'bend2',
+  'bend1_orient', 'bend2_orient', 'bolt1', 'bolt2', 'bolt1_washer', 'bolt2_washer',
+  'bolt1_washer_qty', 'bolt2_washer_qty', 'bolt1_qty', 'bolt2_qty', 'cut', 'sleeve', 'sleeve_qty',
+  'support1', 'support2', 'support3', 'support4', 'support5', 'support6',
+  'support1_flip', 'support2_flip', 'support3_flip', 'support4_flip', 'support5_flip', 'support6_flip',
+  'hose_color', 'legacy_article',
+])
 function getSpecEntries(specs: Specs | null | undefined): [string, string][] {
   if (!specs) return []
   return Object.entries(specs)
-    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+    .filter(([k, v]) => v !== null && v !== undefined && v !== '' && typeof v !== 'object' && !STRUCT_SPEC_KEYS.has(k))
     .map(([k, v]) => [SPEC_LABELS[k] || k, v as string])
+}
+
+// Шайбы каталога: 3 для серии H161, иначе 2
+const WASHER_SKU_CAT = 'CCW-10'
+const washersForBoltCat = (sku: string): number => {
+  const m = (sku || '').toUpperCase().match(/^H?(\d{3})/)
+  return m && m[1] === '161' ? 3 : 2
+}
+
+interface SchemeLine {
+  fitting1: string; insert1: string; bend1: string; bend1_orient: string; bolt1: string
+  cut: string; supports: string[]; supports_flipped: boolean[]
+  fitting2: string; insert2: string; bend2: string; bend2_orient: string; bolt2: string
+}
+// Нормализованные сегменты: из specs.lines[] (новый формат) или синтез из плоских ключей (старый)
+function getSchemeLines(specs: Specs): SchemeLine[] {
+  const norm = (o: Record<string, unknown>): SchemeLine => ({
+    fitting1: String(o.fitting1 || ''), insert1: String(o.insert1 || ''),
+    bend1: String(o.bend1 || ''), bend1_orient: String(o.bend1_orient || ''), bolt1: String(o.bolt1 || ''),
+    cut: String(o.cut || ''),
+    supports: (Array.isArray(o.supports) ? o.supports : []).map(String).filter(Boolean),
+    supports_flipped: Array.isArray(o.supports_flipped) ? o.supports_flipped.map(Boolean) : [],
+    fitting2: String(o.fitting2 || ''), insert2: String(o.insert2 || ''),
+    bend2: String(o.bend2 || ''), bend2_orient: String(o.bend2_orient || ''), bolt2: String(o.bolt2 || ''),
+  })
+  const raw = (specs as unknown as { lines?: Record<string, unknown>[] }).lines
+  if (Array.isArray(raw) && raw.length) return raw.map(norm)
+  const supports = [specs.support1, specs.support2, specs.support3, specs.support4, specs.support5, specs.support6].filter(Boolean) as string[]
+  const flip = supports.map((_, i) => specs[`support${i + 1}_flip`] === '1')
+  return [{ ...norm(specs as unknown as Record<string, unknown>), supports, supports_flipped: flip }]
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -220,91 +259,132 @@ function fmtRub(n: number): string {
 }
 
 function HelSchemeCard({ specs, pm }: { specs: Specs; pm: HelMap }) {
-  const f1 = specs.fitting1 || ''
-  const f2 = specs.fitting2 || ''
-  const ins1 = specs.insert1 || ''
-  const cut = specs.cut || '—'
-  const hc = HOSE_COLORS[specs.hose_color || 'CLEAR'] || '#CCC'
-  const supports = [specs.support1, specs.support2, specs.support3].filter(Boolean) as string[]
-
-  // Calculate price
-  const getP = (sku: string) => pm.get(sku)?.price_dealer ?? 0
-  const cutMm = parseFloat(specs.cut || '0') || 0
+  const lines = getSchemeLines(specs)
+  const getP = (sku: string) => (sku ? (pm.get(sku)?.price_dealer ?? 0) : 0)
   const hoseProduct = Array.from(pm.values()).find(p => p.sku === 'H707')
-  const hosePricePerM = hoseProduct?.price_dealer ?? getP('H707')
-  const hosePrice = (cutMm / 1000) * hosePricePerM
-  const totalPrice = getP(f1) + getP(ins1) + hosePrice + getP(f2) + getP(specs.bolt1 || '') + supports.reduce((s, k) => s + getP(k), 0)
+  const hosePerM = hoseProduct?.price_dealer ?? getP('H707')
+  const sleevePrice = getP('H707-03C')
+  const washerPrice = getP(WASHER_SKU_CAT)
+
+  const linePrice = (ln: SchemeLine) => {
+    const hose = (parseFloat(ln.cut || '0') || 0) / 1000 * hosePerM
+    const sleeves = sleevePrice * 2
+    const washerQty = (ln.bolt1 ? washersForBoltCat(ln.bolt1) : 0) + (ln.bolt2 ? washersForBoltCat(ln.bolt2) : 0)
+    const washers = washerQty * washerPrice
+    const sup = ln.supports.reduce((s, k) => s + getP(k), 0)
+    return getP(ln.fitting1) + getP(ln.insert1) + getP(ln.bolt1) + hose + getP(ln.insert2) + getP(ln.fitting2) + getP(ln.bolt2) + sleeves + washers + sup
+  }
+  const totalPrice = lines.reduce((s, ln) => s + linePrice(ln), 0)
+  const hc = HOSE_COLORS[specs.hose_color || 'CLEAR'] || '#CCC'
 
   return (
     <div className="p-4 border-b border-neutral-100">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-[11px] font-bold text-[#ED1C24] uppercase tracking-widest">Схема сборки HEL</span>
+        <span className="text-[11px] font-bold text-[#ED1C24] uppercase tracking-widest">
+          Схема сборки HEL{lines.length > 1 ? ` · ${lines.length} шланга` : ''}
+        </span>
         {totalPrice > 0 && (
           <span className="font-mono text-sm font-black text-green-700 bg-green-50 border border-green-200 px-3 py-1 rounded-lg">{fmtRub(Math.round(totalPrice))}</span>
         )}
       </div>
 
-      {/* Assembly line */}
-      <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4">
-        <div className="flex items-center min-w-0">
-          <div className="flex flex-col items-center shrink-0 w-[80px]">
-            <PartImg sku={f1} pm={pm} size={72} mirror />
-            <div className="text-[8px] text-[#ED1C24] font-bold mt-1">Ф1</div>
-            <div className="font-mono text-[9px] text-neutral-700 font-bold text-center">{f1}</div>
-          </div>
-          {ins1 && (
-            <div className="flex flex-col items-center shrink-0 w-[80px] mx-0.5">
-              <PartImg sku={ins1} pm={pm} size={72} mirror />
-              <div className="font-mono text-[8px] text-neutral-500 mt-0.5">{ins1}</div>
+      {lines.map((ln, li) => {
+        const w1 = ln.bolt1 ? washersForBoltCat(ln.bolt1) : 0
+        const w2 = ln.bolt2 ? washersForBoltCat(ln.bolt2) : 0
+        return (
+        <div key={li} className="bg-neutral-50 border border-neutral-200 rounded-xl p-4 mb-2">
+          {lines.length > 1 && <div className="text-[9px] font-bold text-neutral-400 uppercase mb-2">Шланг #{li + 1}</div>}
+          {/* Assembly line */}
+          <div className="flex items-center min-w-0">
+            <div className="flex flex-col items-center shrink-0 w-[80px]">
+              <PartImg sku={ln.fitting1} pm={pm} size={72} mirror />
+              <div className="text-[8px] text-[#ED1C24] font-bold mt-1">Ф1</div>
+              <div className="font-mono text-[9px] text-neutral-700 font-bold text-center">{ln.fitting1}</div>
+              {ln.bend1 && <div className="text-[8px] text-amber-600 font-semibold">{ln.bend1}</div>}
+              {ln.bend1_orient && <div className="text-[8px] text-blue-600 font-semibold">↪ {ln.bend1_orient}</div>}
             </div>
-          )}
-          <div className="flex-1 mx-2 flex flex-col items-center">
-            <div className="w-full h-4 rounded-full relative overflow-hidden shadow-sm" style={{ background: hc }}>
-              <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'repeating-linear-gradient(135deg,transparent,transparent 4px,rgba(255,255,255,0.4) 4px,rgba(255,255,255,0.4) 5px)' }} />
-              {supports.length > 0 && (
-                <div className="absolute inset-0 flex justify-around items-center">
-                  {supports.map((_, i) => <div key={i} className="w-1.5 h-7 rounded-full bg-amber-500 -mt-1.5" />)}
-                </div>
-              )}
+            {ln.insert1 && (
+              <div className="flex flex-col items-center shrink-0 w-[80px] mx-0.5">
+                <PartImg sku={ln.insert1} pm={pm} size={72} mirror />
+                <div className="font-mono text-[8px] text-neutral-500 mt-0.5">{ln.insert1}</div>
+              </div>
+            )}
+            <div className="flex-1 mx-2 flex flex-col items-center">
+              <div className="w-full h-4 rounded-full relative overflow-hidden shadow-sm" style={{ background: hc }}>
+                <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'repeating-linear-gradient(135deg,transparent,transparent 4px,rgba(255,255,255,0.4) 4px,rgba(255,255,255,0.4) 5px)' }} />
+                {ln.supports.length > 0 && (
+                  <div className="absolute inset-0 flex justify-around items-center">
+                    {ln.supports.map((_, i) => <div key={i} className="w-1.5 h-7 rounded-full bg-amber-500 -mt-1.5" />)}
+                  </div>
+                )}
+              </div>
+              <span className="font-mono text-sm font-black text-neutral-900 mt-1">{ln.cut || '—'} <span className="text-neutral-400 text-[10px] font-normal">мм</span></span>
             </div>
-            <span className="font-mono text-sm font-black text-neutral-900 mt-1">{cut} <span className="text-neutral-400 text-[10px] font-normal">мм</span></span>
+            {ln.insert2 && (
+              <div className="flex flex-col items-center shrink-0 w-[80px] mx-0.5">
+                <PartImg sku={ln.insert2} pm={pm} size={72} />
+                <div className="font-mono text-[8px] text-neutral-500 mt-0.5">{ln.insert2}</div>
+              </div>
+            )}
+            <div className="flex flex-col items-center shrink-0 w-[80px]">
+              <PartImg sku={ln.fitting2} pm={pm} size={72} />
+              <div className="text-[8px] text-[#ED1C24] font-bold mt-1">Ф2</div>
+              <div className="font-mono text-[9px] text-neutral-700 font-bold text-center">{ln.fitting2}</div>
+              {ln.bend2 && <div className="text-[8px] text-amber-600 font-semibold">{ln.bend2}</div>}
+              {ln.bend2_orient && <div className="text-[8px] text-blue-600 font-semibold">↪ {ln.bend2_orient}</div>}
+            </div>
           </div>
-          <div className="flex flex-col items-center shrink-0 w-[80px]">
-            <PartImg sku={f2} pm={pm} size={72} />
-            <div className="text-[8px] text-[#ED1C24] font-bold mt-1">Ф2</div>
-            <div className="font-mono text-[9px] text-neutral-700 font-bold text-center">{f2}</div>
+
+          {/* Components row */}
+          <div className="flex items-center justify-center gap-3 mt-3 pt-2 border-t border-neutral-200 flex-wrap">
+            {ln.bolt1 && (
+              <div className="flex items-center gap-1">
+                <PartImg sku={ln.bolt1} pm={pm} size={48} mirror />
+                <div className="text-[8px]"><span className="text-neutral-400">Болт </span><span className="font-mono text-neutral-600">{ln.bolt1}</span><br /><span className="text-neutral-400">Шайбы </span><span className="font-mono text-neutral-600">{WASHER_SKU_CAT} ×{w1}</span></div>
+              </div>
+            )}
+            {ln.supports.map((s, i) => (
+              <div key={i} className="flex items-center gap-1">
+                <PartImg sku={s} pm={pm} size={48} mirror={ln.supports_flipped[i]} />
+                <div className="text-[8px]"><span className="text-neutral-400">Креп </span><span className="font-mono text-amber-600">{s}</span></div>
+              </div>
+            ))}
+            {ln.bolt2 && (
+              <div className="flex items-center gap-1">
+                <PartImg sku={ln.bolt2} pm={pm} size={48} />
+                <div className="text-[8px]"><span className="text-neutral-400">Болт </span><span className="font-mono text-neutral-600">{ln.bolt2}</span><br /><span className="text-neutral-400">Шайбы </span><span className="font-mono text-neutral-600">{WASHER_SKU_CAT} ×{w2}</span></div>
+              </div>
+            )}
           </div>
         </div>
+        )
+      })}
 
-        {/* Components row */}
-        <div className="flex items-center justify-center gap-3 mt-3 pt-2 border-t border-neutral-200 flex-wrap">
-          {specs.bolt1 && (
-            <div className="flex items-center gap-1">
-              <PartImg sku={specs.bolt1} pm={pm} size={48} />
-              <div className="text-[8px]"><span className="text-neutral-400">Болт </span><span className="font-mono text-neutral-600">{specs.bolt1}</span></div>
-            </div>
-          )}
-          {specs.bolt2 && (
-            <div className="text-[8px]"><span className="text-neutral-400">Шайба </span><span className="font-mono text-neutral-600">{specs.bolt2} x{specs.bolt2_qty}</span></div>
-          )}
-          {supports.map((s, i) => (
-            <div key={i} className="flex items-center gap-1">
-              <PartImg sku={s} pm={pm} size={48} />
-              <div className="text-[8px]"><span className="text-neutral-400">Креп </span><span className="font-mono text-amber-600">{s}</span></div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Price breakdown */}
+      {/* Price breakdown — детализация по всем компонентам */}
       {totalPrice > 0 && (
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
-          {f1 && getP(f1) > 0 && <div className="flex justify-between"><span className="text-neutral-400">Ф1 {f1}</span><span className="font-mono text-neutral-700">{fmtRub(getP(f1))}</span></div>}
-          {ins1 && getP(ins1) > 0 && <div className="flex justify-between"><span className="text-neutral-400">Вст {ins1}</span><span className="font-mono text-neutral-700">{fmtRub(getP(ins1))}</span></div>}
-          {cutMm > 0 && <div className="flex justify-between"><span className="text-neutral-400">Шланг {cut}мм</span><span className="font-mono text-neutral-700">{fmtRub(Math.round(hosePrice))}</span></div>}
-          {f2 && getP(f2) > 0 && <div className="flex justify-between"><span className="text-neutral-400">Ф2 {f2}</span><span className="font-mono text-neutral-700">{fmtRub(getP(f2))}</span></div>}
-          {specs.bolt1 && getP(specs.bolt1) > 0 && <div className="flex justify-between"><span className="text-neutral-400">Болт</span><span className="font-mono text-neutral-700">{fmtRub(getP(specs.bolt1))}</span></div>}
-          {supports.map((s, i) => getP(s) > 0 && <div key={i} className="flex justify-between"><span className="text-neutral-400">Креп {s}</span><span className="font-mono text-neutral-700">{fmtRub(getP(s))}</span></div>)}
+        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+          {lines.map((ln, li) => {
+            const cutMm = parseFloat(ln.cut || '0') || 0
+            const hose = cutMm / 1000 * hosePerM
+            const w1 = ln.bolt1 ? washersForBoltCat(ln.bolt1) : 0
+            const w2 = ln.bolt2 ? washersForBoltCat(ln.bolt2) : 0
+            const wTotal = (w1 + w2) * washerPrice
+            const row = (label: string, price: number, key: string) => price > 0
+              ? <div key={key} className="flex justify-between"><span className="text-neutral-400">{label}</span><span className="font-mono text-neutral-700">{fmtRub(Math.round(price))}</span></div>
+              : null
+            return [
+              row(`Ф1 ${ln.fitting1}`, getP(ln.fitting1), `${li}f1`),
+              ln.insert1 ? row(`Вст ${ln.insert1}`, getP(ln.insert1), `${li}i1`) : null,
+              cutMm > 0 ? row(`Шланг ${ln.cut}мм`, hose, `${li}h`) : null,
+              ln.insert2 ? row(`Вст ${ln.insert2}`, getP(ln.insert2), `${li}i2`) : null,
+              row(`Ф2 ${ln.fitting2}`, getP(ln.fitting2), `${li}f2`),
+              ln.bolt1 ? row(`Болт ${ln.bolt1}`, getP(ln.bolt1), `${li}b1`) : null,
+              ln.bolt2 ? row(`Болт ${ln.bolt2}`, getP(ln.bolt2), `${li}b2`) : null,
+              ...ln.supports.map((s, i) => row(`Креп ${s}`, getP(s), `${li}s${i}`)),
+              row('Гильзы H707-03C ×2', sleevePrice * 2, `${li}sl`),
+              wTotal > 0 ? row(`Шайбы ${WASHER_SKU_CAT} ×${w1 + w2}`, wTotal, `${li}w`) : null,
+            ]
+          })}
         </div>
       )}
     </div>
