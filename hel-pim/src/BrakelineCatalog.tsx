@@ -485,17 +485,6 @@ function ProductCard({
   useEffect(() => { setEditing(false) }, [product.id])
   const isHel = product.brand === 'HEL'
 
-  if (editing) {
-    return (
-      <HelCardEditor
-        product={product}
-        helProducts={helProducts}
-        onSaved={(p) => { onUpdated?.(p); setEditing(false) }}
-        onCancel={() => setEditing(false)}
-      />
-    )
-  }
-
   const specEntries = getSpecEntries(product.specs)
   const appLines = parseApplication(product.application)
   const crossRefs = parseCrossRefs(product.cross_refs)
@@ -522,6 +511,18 @@ function ProductCard({
         setOemLoading(false)
       })
   }, [product.id, isOemOnly, product.article])
+
+  // Режим редактирования (после всех хуков — иначе нарушаются правила хуков)
+  if (editing) {
+    return (
+      <HelCardEditor
+        product={product}
+        helProducts={helProducts}
+        onSaved={(p) => { onUpdated?.(p); setEditing(false) }}
+        onCancel={() => setEditing(false)}
+      />
+    )
+  }
 
   return (
     <div className="flex flex-col h-full bg-white overflow-hidden">
